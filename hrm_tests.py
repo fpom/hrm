@@ -1,17 +1,33 @@
+import json, collections, operator
+
 from hrm import HRM
 
-tests = {
-    "level-7": ([1, 0, -2, "D", 0, 0, 8, 9],
-                [1, -2, "D", 8, 9]),
-    "level-9": ([1, 0, -2, "D", 0, 0, 8, 9],
-                [0, 0, 0]),
-    "level-14": ([2, 9, -1, -8, 6, 6, 3, 2],
-                 [9, -1, 6, 3]),
-    "level-19": ([3, -5, 0, 7],
-                 [3, 2, 1, 0, -5, -4, -3, -2, -1, 0, 0, 7, 6, 5, 4, 3, 2, 1, 0])
-}
+levels = {}
+for lvl in json.load(open("test/levels.json")) :
+    assert lvl["number"] not in levels, "duplicate level"
+    levels[lvl["number"]] = lvl
 
-for lvl, (inbox, outbox) in tests.items() :
-    hrm = HRM.parse(f"test/{lvl}.hrm")
-    out = hrm(inbox)
-    assert out == outbox, (inbox, "=>", out, "vs", outbox)
+fail, crash, win = 0, 0, 0
+
+for sol in sorted(json.load(open("test/solutions.json")),
+                  key=operator.itemgetter("levelNumber")):
+    if sol["successRatio"] != 1 :
+        continue
+    lvl = levels[sol["levelNumber"]]
+    print(f"level {lvl['number']} with solution {sol['path']}")
+    floor = lvl["floor"]["tiles"] if "floor" in lvl and "tiles" in lvl["floor"] else []
+    hrm = HRM.parse(f"test/solutions/{sol['path']}")
+    for example in lvl["examples"] :
+        try :
+            out = hrm(example["inbox"], floor)
+        except :
+            print("* crashed")
+            crash += 1
+            break
+        if out != example["outbox"] :
+            print("! failed")
+            break
+            fail += 1
+        win += 1
+
+print(f"{win} succeeded / {fail} failed / {crash} crashed")

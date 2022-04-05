@@ -60,14 +60,19 @@ class HRM (object) :
     @classmethod
     def parse (cls, src) :
         return cls(parse(src))
-    def __call__ (self, inbox, verbose=False) :
+    def __call__ (self, inbox, floor=[], verbose=False) :
         self.verbose = verbose
         self.ip = 0
-        self.tiles = {}
+        if isinstance(floor, dict) :
+            self.tiles = {int(k) : v for k, v in floor.items()}
+        else :
+            self.tiles = dict(enumerate(floor))
         self.inbox = deque(inbox)
         self.outbox = []
         self.hands = None
         while True :
+            if self.ip >= len(self.prog) :
+                break
             op, *args = self.prog[self.ip]
             self.ip += 1
             handler = getattr(self, f"op_{op.lower()}")

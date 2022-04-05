@@ -17,6 +17,14 @@ TikZ code requires to use package `hrm.sty`.
 
 ## Limitations
 
- * not all language is supported (tiles labels in particular)
- * the parser is not robust and intended to parse correct code only
+ * the parser is not very robust
  * generated TikZ code generally requires manual editing
+
+## Tests
+
+The content of directory `test` has been borrowed from:
+
+ * [atesgoral.github.io/hrm-solutions](http://atesgoral.github.io/hrm-solutions)
+   for the solutions (`solutions.json` and sub-directory `solutions`)
+ * [github.com/atesgoral/hrm-level-data](http://github.com/atesgoral/hrm-level-data)
+   for the information about levels (`levels.json`)

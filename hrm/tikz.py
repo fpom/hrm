@@ -25,10 +25,8 @@ label = {"inbox" : "\\raisebox{-.2ex}{\\ding{231}}\\texttt{inbox}",
          "jumpz" : "\\texttt{jump}${}^{\\texttt{\\relsize{-1}if}}_{\\texttt{\\relsize{-1}zero}}$",
          "jumpn" : "\\texttt{jump}${}^{\\texttt{\\relsize{-1}if}}_{\\texttt{\\relsize{-1}negative}}$"}
 
-def tikz (src, out=None, headers=False) :
-    if out is None :
-        out = sys.stdout
-    elif isinstance(out, str) :
+def tikz (src, out=sys.stdout, headers=False) :
+    if isinstance(out, str) :
         out = open(out, "w")
     if headers :
         out.write("\\documentclass{standalone}\n"

@@ -2,24 +2,19 @@ import json, collections, operator
 
 from hrm import HRM
 
-levels = {}
-for lvl in json.load(open("test/levels.json")) :
-    assert lvl["number"] not in levels, "duplicate level"
-    levels[lvl["number"]] = lvl
-
 fail, crash, win = 0, 0, 0
 
 for sol in sorted(json.load(open("test/solutions.json")),
                   key=operator.itemgetter("levelNumber")):
     if sol["successRatio"] != 1 :
         continue
-    lvl = levels[sol["levelNumber"]]
-    print(f"level {lvl['number']} with solution {sol['path']}")
-    floor = lvl["floor"]["tiles"] if "floor" in lvl and "tiles" in lvl["floor"] else []
+    num = sol["levelNumber"]
+    print(f"level {num} vs {sol['path']}")
     hrm = HRM.parse(f"test/solutions/{sol['path']}")
-    for example in lvl["examples"] :
+    lvl = hrm.level(num)
+    for ex, example in enumerate(lvl["examples"]) :
         try :
-            out = hrm(example["inbox"], floor)
+            out = hrm.runlevel(lvl, ex)
         except :
             print("* crashed")
             crash += 1

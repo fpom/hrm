@@ -1,6 +1,6 @@
 # coding: utf-8
 
-import functools, pathlib
+import functools, pathlib, json
 from collections import deque
 
 from .parse import parse
@@ -60,6 +60,19 @@ class HRM (object) :
     @classmethod
     def parse (cls, src) :
         return cls(parse(src))
+    def level (self, level) :
+        path = pathlib.Path(__file__).parent / "levels.json"
+        for lvl in json.load(path.open()) :
+            if lvl["number"] == level :
+                return lvl
+    def runlevel (self, level, example=0, verbose=False) :
+        if isinstance(level, int) :
+            level = self.level(level)
+        if "floor" in level and "tiles" in level["floor"] :
+            floor = level["floor"]["tiles"]
+        else :
+            floor = []
+        return self(level["examples"][example]["inbox"], floor, verbose)
     def __call__ (self, inbox, floor=[], verbose=False) :
         self.verbose = verbose
         self.ip = 0

@@ -5,9 +5,9 @@ import hrm
 
 readme = (Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
-setup(name="Minimalist Human Resource Machine implementation",
+setup(name="hrmi",
       version=hrm.VERSION,
-      description="Generate command-line options for C compiler from used headers",
+      description="Minimalist Human Resource Machine implementation",
       long_description=readme.split("##")[0].strip(),
       long_description_content_type="text/markdown",
       licence="MIT",

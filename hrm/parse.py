@@ -13,11 +13,12 @@ def tokenize (src) :
         else :
             stream = io.StringIO(src)
     else :
-        raise ValueError("expected path or source text")
+        assert False, "invalid source"
     text = stream.read()
     skip = False
     labels = set()
-    for num, (line, raw) in enumerate((l.strip(), l) for l in text.splitlines()) :
+    for num, (line, raw) in enumerate(((l.strip(), l) for l in text.splitlines()),
+                                      start=1) :
         toks = line.split()
         if skip :
             if not line or line.endswith(";") :

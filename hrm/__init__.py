@@ -3,20 +3,22 @@
 import functools, pathlib, json
 from collections import deque
 
+from colorama import Fore as F, Back as B, Style as S
+
 from .parse import parse
 
-ops = {"inbox" : "➡️inbox",
-       "outbox" : "outbox➡️" ,
-       "copyfrom" : "copyfrom",
-       "copyto" : "copyto",
-       "add" : "add",
-       "sub" : "sub",
-       "bumpup" : "bump+",
-       "bumpdn" : "bump-",
-       "jump" : "jump",
-       "jumpz" : "jump=0",
-       "jumpn" : "jump<0"}
-op_width = max(len(v) for v in ops.values())
+colors = {"inbox" : F.GREEN,
+          "outbox" : F.GREEN,
+          "copyfrom" : F.RED,
+          "copyto" : F.RED,
+          "add" : B.YELLOW,
+          "sub" : B.YELLOW,
+          "bumpup" : B.YELLOW,
+          "bumpdn" : B.YELLOW,
+          "jump" : F.BLUE,
+          "jumpz" : F.BLUE,
+          "jumpn" : F.BLUE}
+op_width = max(len(v) for v in colors)
 
 def log (method) :
     name = method.__name__[3:]
@@ -48,7 +50,9 @@ def log (method) :
                 post.append(f"😬 {self.hands if self.hands is not None else ''}")
             if pre["ip"] != self.ip :
                 post.append(f"👉 {self.ip}")
-            head = " ".join([name] + [str(a) for a in args]).ljust(op_width + 3)
+            head = (colors[name]
+                    + " ".join([name] + [str(a) for a in args]).ljust(op_width + 3)
+                    + S.RESET_ALL)
             if err :
                 print(head, f"😡 {err}")
             elif ret is True :

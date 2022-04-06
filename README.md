@@ -1,7 +1,7 @@
 # Minimalist Human Resource Machine implementation
 
-This is a Python interpreter for [Human Resource Machine](http://tomorrowcorporation.com/humanresourcemachine) from [Tomorrow Corporation](http://tomorrowcorporation.com).
-From the game, one may copy/paste the source code that is edited visually.
+This is a Python interpreter for programs from the [Human Resource Machine](http://tomorrowcorporation.com/humanresourcemachine) game from [Tomorrow Corporation](http://tomorrowcorporation.com).
+Within the game, one may copy/paste the source code that is edited visually.
 This library features a parser for this code, an interpreter, and a translator into TikZ pictures to be included in LaTeX.
 
 ```pycon
@@ -14,7 +14,36 @@ This library features a parser for this code, an interpreter, and a translator i
 >>> draw('level-2.hrm', 'level-2.pdf')
 ```
 
-`hrm` object could also have been called with `verbose=True`, which traces the execution.
+## Language
+
+If not copied from the game, a program may be written from scratch:
+
+ * each command is given on s single line
+ * empty line and spacing are non-significant
+ * comments start with `--` and extend up to the end of the line
+ * code is case insensitive (in the implementation at least)
+ * available commands are:
+   * `inbox` grab a value from the INBOX
+   * `outbox` put the value at hand to the OUTBOX
+   * `copyfrom N` put a copy of the value at hand onto floor tile `N`
+   * `copyto N` grab a copy of the value stored on floor tile `N`.
+     if `N` is `[A]`, the tile from which the value is copied is that 
+     whose number is stored on tile `A`
+   * `add N` add the value stored on tile `N` to that at hand,
+     the result goes to hands
+   * `add N` substract the value stored on tile `N` from that at hand,
+     the result goes to hands. This operation is valid on letters in which
+     case it computes the distance between two letters in the alphabet
+   * `bumpup N` increments the value stored on tile `N` and copies to result
+     to hands
+   * `bumpdn N` decrements the value stored on tile `N` and copies to result
+     to hands
+   * `jump L` jump to label `L` that should be defined somewhere as
+     `L:` alone on its line
+   * `jumpz L` jump to label `L` if the value at hand is zero
+   * `jumpn L` jump to label `L` if the value at hand is less that zero
+
+Copying code from the game may yield other elements (like drawn tiles labels and comments), but they are ignored in this implementation.
 
 ## API
 
@@ -85,10 +114,15 @@ Exporting programs to PDF requires pdflatex with TikZ installed.
 
 ## Limitations
 
- * missing `setup.py`
- * missing a real cli script
  * the parser is not very robust
  * generated TikZ code generally requires manual editing
+ 
+Differences with the game:
+ * the number of available tiles is not limited
+ * indirection `[A]` is not limited to `copyfrom`
+ * a label may be jumped to from several locations in the program,
+   which is never the case in code copied from the game
+   as each jump is attached to exactly one target
 
 ## Borrowed files
 

@@ -37,59 +37,63 @@ parser.add_argument("-q", dest="quit", default=False, action="store_true",
 parser.add_argument("prog", type=str, metavar="PROG", action="store",
                     help="program to be run")
 
-args = parser.parse_args()
+def main () :
+    args = parser.parse_args()
 
-try :
-    run = HRM.parse(args.prog)
-except AssertionError as err :
-    parser.exit(1, str(err))
+    try :
+        run = HRM.parse(args.prog)
+    except AssertionError as err :
+        parser.exit(1, str(err))
 
-if args.pdf is not None :
-    draw(args.prog, args.pdf)
+    if args.pdf is not None :
+        draw(args.prog, args.pdf)
 
-if args.latex is not None :
-    tikz(args.prog, args.latex, True)
+    if args.latex is not None :
+        tikz(args.prog, args.latex, True)
 
-if args.quit :
-    sys.exit(0)
+    if args.quit :
+        sys.exit(0)
 
-random.seed()
+    random.seed()
 
-if args.inbox is not None :
-    inbox = args.inbox.split(",")
-    for i, v in enumerate(inbox) :
-        if len(v) == 1 and v in string.ascii_letters :
-            inbox[i] = v.upper()
-        else :
-            try :
-                inbox[i] = int(v)
-            except :
-                parser.exit(2, f"invalid inbox value {v!r}")
-else :
-    size = args.size or random.randint(10,20)
-    if args.numeric :
-        inbox = [random.randint(-20,20) for _ in range(size)]
+    if args.inbox is not None :
+        inbox = args.inbox.split(",")
+        for i, v in enumerate(inbox) :
+            if len(v) == 1 and v in string.ascii_letters :
+                inbox[i] = v.upper()
+            else :
+                try :
+                    inbox[i] = int(v)
+                except :
+                    parser.exit(2, f"invalid inbox value {v!r}")
     else :
-        inbox = [random.choice(list(range(-20, 21)) + list(string.ascii_uppercase))
-                 for _ in range(size)]
-
-if args.tiles :
-    tiles = args.tiles.split(",")
-    for i, v in enumerate(tiles) :
-        if not v :
-            tiles[i] = None
-        elif len(v) == 1 and v in string.ascii_letters :
-            tiles[i] = v.upper()
+        size = args.size or random.randint(10,20)
+        if args.numeric :
+            inbox = [random.randint(-20,20) for _ in range(size)]
         else :
-            try :
-                tiles[i] = int(v)
-            except :
-                parser.exit(2, f"invalid tile value {v!r}")
-else :
-    tiles = []
+            inbox = [random.choice(list(range(-20, 21)) + list(string.ascii_uppercase))
+                     for _ in range(size)]
 
-try :
-    outbox = run(inbox, tiles, args.verbose)
-    print(*outbox)
-except AssertionError as err :
-    parser.exit(1, str(err))
+    if args.tiles :
+        tiles = args.tiles.split(",")
+        for i, v in enumerate(tiles) :
+            if not v :
+                tiles[i] = None
+            elif len(v) == 1 and v in string.ascii_letters :
+                tiles[i] = v.upper()
+            else :
+                try :
+                    tiles[i] = int(v)
+                except :
+                    parser.exit(2, f"invalid tile value {v!r}")
+    else :
+        tiles = []
+
+    try :
+        outbox = run(inbox, tiles, args.verbose)
+        print(*outbox)
+    except AssertionError as err :
+        parser.exit(1, str(err))
+
+if __name__ == "__main__" :
+    main()

@@ -51,7 +51,7 @@ Methods for an `HRM` instance `run`:
 
 ## Command-line interface
 
-```bash
+```
 $ python -m hrm --help
 usage: hrmi [-h] [-v] [-p PDF] [-l LATEX] [-i INBOX] [-n] [-s SIZE] [-t TILES]
             [-q]

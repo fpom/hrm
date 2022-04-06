@@ -28,7 +28,11 @@ def log (method) :
             pre["hands"] = self.hands
             pre["inbox"] = len(self.inbox)
             pre["outbox"] = len(self.outbox)
-        ret = method(self, *args)
+        err = None
+        try :
+            ret = method(self, *args)
+        except AssertionError as exc :
+            err = exc
         if self.verbose :
             post = []
             hands = False
@@ -45,13 +49,18 @@ def log (method) :
             if pre["ip"] != self.ip :
                 post.append(f"👉 {self.ip}")
             head = " ".join([name] + [str(a) for a in args]).ljust(op_width + 3)
-            if ret :
+            if err :
+                print(head, f"😡 {err}")
+            elif ret is True :
                 print(head, "🛑")
             elif post :
                 print(head, " / ".join(post))
             else :
                 print(head)
-        return ret
+        if err is not None :
+            raise err
+        else :
+            return ret
     return wrapper
 
 class HRM (object) :
@@ -116,7 +125,7 @@ class HRM (object) :
             return True
     @log
     def op_outbox (self) :
-        assert self.hands is not None
+        assert self.hands is not None, f"you don't hold any value"
         self.outbox.append(self.hands)
         self.hands = None
     @log
@@ -127,31 +136,50 @@ class HRM (object) :
         self[addr] = self.hands
     @log
     def op_add (self, addr) :
-        assert self.hands is not None
-        self.hands += self[addr]
+        assert self.hands is not None, f"you don't hold any value"
+        assert isinstance(self.hands, int), f"cannot add to value {self.hands!r}"
+        val = self[addr]
+        assert isinstance(val, int), f"cannot add value {val!r}"
+        self.hands += val
     @log
     def op_sub (self, addr) :
-        assert self.hands is not None
-        self.hands -= self[addr]
+        assert self.hands is not None, f"you don't hold any value"
+        val = self[addr]
+        if isinstance(self.hands, int) and isinstance(val, int) :
+            self.hands -= val
+        elif isinstance(self.hands, str) and isinstance(val, str) :
+            self.hands = ord(self.hands) - ord(val)
+        else :
+            assert False, f"cannot sub {val!r} from {self.hands!r}"
     @log
     def op_bumpup (self, addr) :
-        self.hands = self[addr] = self[addr] + 1
+        val = self[addr]
+        assert isinstance(val, int), f"cannot increment value {self.hands!r}"
+        self.hands = self[addr] = val + 1
     @log
     def op_bumpdn (self, addr) :
-        self.hands = self[addr] = self[addr] - 1
+        val = self[addr]
+        assert isinstance(val, int), f"cannot decrement value {self.hands!r}"
+        self.hands = self[addr] = val - 1
     @log
     def op_jump (self, pos) :
-        assert 0 <= pos < len(self.prog)
+        assert 0 <= pos <= len(self.prog), f"invalid program position"
+        if pos == len(self.prog) :
+            return True
         self.ip = pos
     @log
     def op_jumpz (self, pos) :
-        assert self.hands is not None
-        assert 0 <= pos < len(self.prog)
+        assert self.hands is not None, f"you don't hold any value"
+        assert 0 <= pos <= len(self.prog), f"invalid program position"
         if self.hands == 0 :
+            if pos == len(self.prog) :
+                return True
             self.ip = pos
     @log
     def op_jumpn (self, pos) :
-        assert self.hands is not None
-        assert 0 <= pos < len(self.prog)
+        assert self.hands is not None, f"you don't hold any value"
+        assert 0 <= pos <= len(self.prog), f"invalid program position"
         if self.hands < 0 :
+            if pos == len(self.prog) :
+                return True
             self.ip = pos

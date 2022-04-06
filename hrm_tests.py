@@ -1,28 +1,34 @@
-import json, collections, operator
+# coding: utf-8
+
+import json, collections, operator, sys
+import tqdm
+
+from colorama import Fore as F, Style as S
+from IPython.core import ultratb
 
 from hrm import HRM
 
-fail, crash, win = 0, 0, 0
+log = tqdm.tqdm(sorted(json.load(open("solutions/solutions.json")),
+                       key=operator.itemgetter("levelNumber")))
 
-for sol in sorted(json.load(open("test/solutions.json")),
-                  key=operator.itemgetter("levelNumber")):
-    if sol["successRatio"] != 1 :
-        continue
+for sol in log :
+    try :
+        hrm = HRM.parse(f"solutions/{sol['path']}")
+    except :
+        log.write(f"{F.RED}parse error:{S.RESET_ALL} {sol['path']}")
     num = sol["levelNumber"]
-    print(f"level {num} vs {sol['path']}")
-    hrm = HRM.parse(f"test/solutions/{sol['path']}")
     lvl = hrm.level(num)
     for ex, example in enumerate(lvl["examples"]) :
         try :
             out = hrm.runlevel(lvl, ex)
+        except AssertionError as err :
+            log.write(f"{F.RED}{S.BRIGHT}invalid:{S.RESET_ALL} {sol['path']}")
+            log.write(f"  😡 {F.RED}{S.DIM}{err}{S.RESET_ALL}")
+            break
         except :
-            print("* crashed")
-            crash += 1
+            log.write(f"{F.RED}{S.BRIGHT}crashed:{S.RESET_ALL} {sol['path']}")
+            vtb = ultratb.VerboseTB(color_scheme="Linux")
+            log.write("\n".join(vtb.structured_traceback(*sys.exc_info())))
             break
-        if out != example["outbox"] :
-            print("! failed")
-            break
-            fail += 1
-        win += 1
-
-print(f"{win} succeeded / {fail} failed / {crash} crashed")
+        if sol["successRatio"] == 1 and sol["worky"] and out != example["outbox"] :
+            log.write(f"{F.YELLOW}failed:{S.RESET_ALL} {sol['path']}")

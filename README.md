@@ -1,4 +1,4 @@
-# Minimalist Human Resource Machine implementation
+# Human Resource Machine interpreter
 
 This is a Python interpreter for programs from the [Human Resource Machine](http://tomorrowcorporation.com/humanresourcemachine) game from [Tomorrow Corporation](http://tomorrowcorporation.com).
 Within the game, one may copy/paste the source code that is edited visually.
@@ -13,6 +13,10 @@ This library features a parser for this code, an interpreter, and a translator i
 >>> tikz('level-2.hrm', 'level-2.tex')
 >>> draw('level-2.hrm', 'level-2.pdf')
 ```
+
+## Installation
+
+Just run `pip install hrm-interpreter` or clone the git repository and run `python setup.py install`.
 
 ## Language
 

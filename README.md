@@ -22,7 +22,7 @@ Just run `pip install hrm-interpreter` or clone the git repository and run `pyth
 
 If not copied from the game, a program may be written from scratch:
 
- * each command is given on s single line
+ * each command is given on a single line
  * empty line and spacing are non-significant
  * comments start with `--` and extend up to the end of the line
  * code is case insensitive (in the implementation at least)
@@ -35,7 +35,7 @@ If not copied from the game, a program may be written from scratch:
      whose number is stored on tile `A`
    * `add N` add the value stored on tile `N` to that at hand,
      the result goes to hands
-   * `add N` substract the value stored on tile `N` from that at hand,
+   * `sub N` substract the value stored on tile `N` from that at hand,
      the result goes to hands. This operation is valid on letters in which
      case it computes the distance between two letters in the alphabet
    * `bumpup N` increments the value stored on tile `N` and copies to result
@@ -46,6 +46,7 @@ If not copied from the game, a program may be written from scratch:
      `L:` alone on its line
    * `jumpz L` jump to label `L` if the value at hand is zero
    * `jumpn L` jump to label `L` if the value at hand is less that zero
+ * labels are defined using `NAME:`
 
 Copying code from the game may yield other elements (like drawn tiles labels and comments), but they are ignored in this implementation.
 

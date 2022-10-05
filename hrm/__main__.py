@@ -90,8 +90,13 @@ def main () :
         tiles = []
 
     try :
+        if args.verbose :
+            print("<", *inbox)
         outbox = run(inbox, tiles, args.verbose)
-        print(*outbox)
+        if args.verbose :
+            print(">", *outbox)
+        else :
+            print(*outbox)
     except AssertionError as err :
         parser.exit(1, str(err))
 

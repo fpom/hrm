@@ -31,8 +31,6 @@ If not copied from the game, a program may be written from scratch:
    * `outbox` put the value at hand to the OUTBOX
    * `copyfrom N` put a copy of the value at hand onto floor tile `N`
    * `copyto N` grab a copy of the value stored on floor tile `N`.
-     if `N` is `[A]`, the tile from which the value is copied is that 
-     whose number is stored on tile `A`
    * `add N` add the value stored on tile `N` to that at hand,
      the result goes to hands
    * `sub N` substract the value stored on tile `N` from that at hand,
@@ -46,6 +44,8 @@ If not copied from the game, a program may be written from scratch:
      `L:` alone on its line
    * `jumpz L` jump to label `L` if the value at hand is zero
    * `jumpn L` jump to label `L` if the value at hand is less that zero
+ * if a tile number `N` is `[A]`, the tile from which the value is copied
+   is that whose number is stored on tile `A`
  * labels are defined using `NAME:`
 
 Copying code from the game may yield other elements (like drawn tiles labels and comments), but they are ignored in this implementation.

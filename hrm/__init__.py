@@ -1,6 +1,6 @@
 # coding: utf-8
 
-VERSION = "1.0"
+VERSION = "1.1"
 
 import functools, pathlib, json
 from collections import deque

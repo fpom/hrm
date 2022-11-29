@@ -28,6 +28,8 @@ parser.add_argument("-i", dest="inbox", type=str, default=None, action="store",
                     help="run with INBOX given as comma-separated values")
 parser.add_argument("-n", dest="numeric", default=False, action="store_true",
                     help="generate INBOX with only numeric values")
+parser.add_argument("-N", dest="positive", default=False, action="store_true",
+                    help="generate INBOX with no negative values")
 parser.add_argument("-s", dest="size", type=int, default=None, action="store",
                     help="generate INBOX with SIZE values")
 parser.add_argument("-t", dest="tiles", type=str, default=None, action="store",
@@ -68,10 +70,14 @@ def main () :
                     parser.exit(2, f"invalid inbox value {v!r}")
     else :
         size = args.size or random.randint(10,20)
-        if args.numeric :
-            inbox = [random.randint(-20,20) for _ in range(size)]
+        if args.positive :
+            MIN, MAX = 0, 20
         else :
-            inbox = [random.choice(list(range(-20, 21)) + list(string.ascii_uppercase))
+            MIN, MAX = -20, 20
+        if args.numeric :
+            inbox = [random.randint(MIN,MAX) for _ in range(size)]
+        else :
+            inbox = [random.choice(list(range(MIN,MAX+1)) + list(string.ascii_uppercase))
                      for _ in range(size)]
 
     if args.tiles :

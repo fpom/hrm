@@ -139,6 +139,7 @@ class HRM (object) :
         self.hands = self[addr]
     @log
     def op_copyto (self, addr) :
+        assert self.hands is not None, f"you don't hold any value"
         self[addr] = self.hands
     @log
     def op_add (self, addr) :

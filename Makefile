@@ -1,5 +1,5 @@
 test:
-	python hrm_test.py
+	python hrm_tests.py
 
 upload:
 	rm -rf dist

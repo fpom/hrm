@@ -3,7 +3,6 @@
 VERSION = "1.1"
 
 import functools, pathlib, json
-from collections import deque
 
 from colorama import Fore as F, Back as B, Style as S
 
@@ -27,31 +26,14 @@ def log (method) :
     @functools.wraps(method)
     def wrapper (self, *args) :
         if self.verbose :
-            pre = dict(self.tiles)
-            pre["ip"] = self.ip
-            pre["hands"] = self.hands
-            pre["inbox"] = len(self.inbox)
-            pre["outbox"] = len(self.outbox)
+            self.update = {"inbox" : len(self.inbox),
+                           "outbox" : len(self.outbox)}
         err = None
         try :
             ret = method(self, *args)
         except AssertionError as exc :
             err = exc
         if self.verbose :
-            post = []
-            hands = False
-            for addr in range(max(self.tiles, default=-1) + 1) :
-                if (be := pre.get(addr, None)) != (af := self.tiles.get(addr, None)) :
-                    post.append(f"🔢 {addr}={af}")
-            if len(self.inbox) != pre["inbox"] :
-                post.append(f"📤 {self.hands}")
-                hands = True
-            if len(self.outbox) != pre["outbox"] :
-                post.append(f"📥 {self.outbox[-1]}")
-            if hands or self.hands != pre["hands"] :
-                post.append(f"😬 {self.hands if self.hands is not None else ''}")
-            if pre["ip"] != self.ip :
-                post.append(f"👉 {self.ip}")
             head = (colors[name]
                     + " ".join([name] + [str(a) for a in args]).ljust(op_width + 3)
                     + S.RESET_ALL)
@@ -59,10 +41,20 @@ def log (method) :
                 print(head, f"😡 {err}")
             elif ret is True :
                 print(head, "🛑")
-            elif post :
-                print(head, " / ".join(post))
             else :
-                print(head)
+                post = []
+                for key, val in self.update.items() :
+                    if key == "inbox" and len(self.inbox) != val :
+                        post.append(f"📤 {self.hands}")
+                    elif key == "outbox" and len(self.outbox) != val :
+                        post.append(f"📥 {self.outbox[-1]}")
+                    elif isinstance(key, int) :
+                        post.append(f"🔢 {key}←{val}")
+                    elif key == "ip" :
+                        post.append(f"👉 {self.ip}")
+                    elif key == "hands" :
+                        post.append(f"😬 {self.hands if self.hands is not None else ''}")
+                print(head, " / ".join(post))
         if err is not None :
             raise err
         else :
@@ -90,14 +82,13 @@ class HRM (object) :
         return self(level["examples"][example]["inbox"], floor, verbose)
     def __call__ (self, inbox, floor=[], verbose=False) :
         self.verbose = verbose
-        self.ip = 0
+        self.state = {"ip" : 0, "hands" : None}
         if isinstance(floor, dict) :
-            self.tiles = {int(k) : v for k, v in floor.items()}
+            self.state.update((int(k), v) for k, v in floor.items())
         else :
-            self.tiles = dict(enumerate(floor))
-        self.inbox = deque(inbox)
+            self.state.update(enumerate(floor))
+        self.inbox = list(inbox)
         self.outbox = []
-        self.hands = None
         while True :
             if self.ip >= len(self.prog) :
                 break
@@ -107,26 +98,47 @@ class HRM (object) :
             if handler(*args) :
                 break
         return self.outbox
+    @property
+    def ip (self) :
+        return self["ip"]
+    @ip.setter
+    def ip (self, value) :
+        self["ip"] = value
+    @property
+    def hands (self) :
+        return self["hands"]
+    @hands.setter
+    def hands (self, value) :
+        self["hands"] = value
     def __getitem__ (self, addr) :
-        if isinstance(addr, int) :
-            assert self.tiles.get(addr, None) is not None, f"tile {addr} is empty"
-            return self.tiles[addr]
-        elif isinstance(addr, list) :
-            assert len(addr)==1 and isinstance(addr[0], int), f"invalid address {addr!r}"
+        if addr == "ip" :
+            return self.state["ip"]
+        elif addr == "hands" :
+            return self.state["hands"]
+        elif isinstance(addr, int) :
+            assert self.state.get(addr, None) is not None, f"tile {addr} is empty"
+            return self.state[addr]
+        elif isinstance(addr, list) and len(addr) == 1 and isinstance(addr[0], int) :
             return self[self[addr[0]]]
         else :
             raise ValueError(f"invalid address {addr!r}")
     def __setitem__ (self, addr, value) :
-        if isinstance(addr, int) :
-            self.tiles[addr] = value
-        elif isinstance(addr, list) :
-            self[self[addr[0]]] = value
+        update = getattr(self, "update", {})
+        if addr == "ip" :
+            self.state["ip"] = update["ip"] = value
+        elif addr == "hands" :
+            self.state["hands"] = update["hands"] = value
+        elif isinstance(addr, int) :
+            self.state[addr] = update[addr] = value
+        elif isinstance(addr, list) and len(addr) == 1 and isinstance(addr[0], int) :
+            a = self[addr[0]]
+            self[a] = update[a] = value
         else :
             raise ValueError(f"invalid address {addr!r}")
     @log
     def op_inbox (self) :
         if self.inbox :
-            self.hands = self.inbox.popleft()
+            self.hands = self.inbox.pop(0)
         else :
             return True
     @log

@@ -1,12 +1,10 @@
 from setuptools import setup, find_packages
 from pathlib import Path
 
-import hrm
-
 readme = (Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
 setup(name="hrm-interpreter",
-      version=hrm.VERSION,
+      version="1.2",
       description="Minimalist Human Resource Machine interpreter",
       long_description=readme.split("##")[0].strip(),
       long_description_content_type="text/markdown",
@@ -22,6 +20,6 @@ setup(name="hrm-interpreter",
                    "Operating System :: OS Independent"],
       packages=find_packages(where="."),
       python_requires=">=3.8",
-      install_requires=["colorama"],
+      requires=["colorama"],
       package_data={"" : ["*.json"]},
       entry_points={"console_scripts": ["hrmi=hrm.__main__:main"]})

@@ -30,7 +30,7 @@ def tokenize (src) :
         elif line.startswith("--") or (toks and toks[0].lower() == "comment") :
             continue
         elif line.endswith(":") :
-            lbl = line[:-1]
+            lbl = line[:-1].strip()
             assert lbl not in labels, (f"[{num}] parse error:"
                                        f" duplicate label {raw!r}")
             labels.add(lbl)
@@ -53,7 +53,7 @@ def parse (src) :
     for pos, (num, cmd) in enumerate(prog) :
         for i, a in enumerate(cmd[1:], start=1) :
             if a in labels :
-                cmd[i] = labels[a]
+                pass
             elif a.startswith("[") and a.endswith("]") :
                 try :
                     cmd[i] = [int(a[1:-1])]
@@ -65,4 +65,4 @@ def parse (src) :
                 except :
                     assert False, f"[{num}] parse error: invalid integer {a!r}"
         prog[pos] = cmd
-    return prog
+    return prog, labels

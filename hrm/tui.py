@@ -1,4 +1,5 @@
 import curses
+import math
 import re
 
 from collections import defaultdict
@@ -65,20 +66,36 @@ class Prog:
             self.prog.append(f"  [{self.hl[op]}:{op}] {args}")
             self.width = max(self.width, 2 + len(op) + len(args))
 
-    def __iter__(self):
-        yield from self.prog
+    def clip(self, ip, count):
+        size = len(self.prog)
+        if size <= count:
+            start = 0
+            stop = len(self.prog)
+            ipidx = self.addr[ip]
+        else:
+            mid = self.addr[ip]
+            start = mid - math.ceil(count / 2)
+            stop = mid + math.floor(count / 2)
+            if start < 0:
+                start, stop = 0, count
+            elif stop > size:
+                start, stop = size - count, size
+            ipidx = mid - start
+            assert stop - start == count, f"{start=}, {mid=}, {stop=}, {size=}"
+        for num, line in enumerate(self.prog[start:stop]):
+            yield line, num == ipidx
 
 
 class Interface:
     def __init__(self, hrm, inbox, floor=[]):
         self.hrm = hrm
+        self.run = hrm.iter(inbox, floor)
+        next(self.run)
         self.prog = Prog(hrm)
         self.menu = ["next", "play", "quit"]
         self.error = None
         self.idle = False
         self.delay = 500
-        self.run = hrm.iter(inbox, floor)
-        next(self.run)
 
     def __enter__(self):
         self.win = curses.initscr()
@@ -113,12 +130,14 @@ class Interface:
         self.win.addch(0, pos-1, curses.ACS_RTEE)
         self.win.addch(0, pos + len(title), curses.ACS_LTEE)
         # program
-        for num, cmd in enumerate(self.prog):
+        for num, (cmd, isip) in enumerate(self.prog.clip(self.hrm.ip,
+                                                         self._h-4)):
             self.t(num+2, self._wl+3, cmd)
-        self.win.addch(self.prog.addr[self.hrm.ip] + 2,
-                       self._wl + 1,
-                       curses.ACS_DIAMOND,
-                       self.t.pairs["C"])
+            if isip:
+                self.win.addch(num + 2,
+                               self._wl + 1,
+                               curses.ACS_DIAMOND,
+                               self.t.pairs["C"])
         # inbox and outbox
         y = 2
         for box in ("inbox", "outbox"):
@@ -160,14 +179,14 @@ class Interface:
         else:
             self.t(self._h-3, 2, f"\U0001f92c [R:{self.error}]")
         # menu and rate
+        rate = f"{1000 / self.delay:.1f}".rstrip("0").rstrip(".")
+        pos = self._wl - len(rate) - 11
+        self.t(self._h-1, pos, f" [B:+]/[B:-] {rate} op/s ")
         if isinstance(self.menu, list):
             menu = " | ".join(f"[B:{m[0]}]{m[1:]}" for m in self.menu)
         else:
             menu = self.menu
         self.t(self._h-1, 2, f" {menu} ")
-        rate = f"{1000 / self.delay:.1f}".rstrip("0").rstrip(".")
-        pos = self._wl - len(rate) - 11
-        self.t(self._h-1, pos, f" [B:+]/[B:-] {rate} op/s ")
         #
         self.win.refresh()
 
@@ -180,7 +199,7 @@ class Interface:
             if 32 <= key <= 254:
                 key = chr(key)
             if key == "q":
-                self.menu = "press a key..."
+                self.menu = "press a key to exit..."
                 break
             elif key == "p":
                 play = not play
@@ -191,7 +210,10 @@ class Interface:
                     self.win.timeout(-1)
                     self.menu = ["next", "play", "quit"]
             elif key == "+" or key == curses.KEY_UP:
-                self.delay = max(100, self.delay - 100)
+                if self.delay <= 100:
+                    self.delay = max(10, self.delay - 10)
+                else:
+                    self.delay = max(100, self.delay - 100)
             elif key == "-" or key == curses.KEY_DOWN:
                 self.delay = min(1000, self.delay + 100)
             elif key == "=":
@@ -202,10 +224,11 @@ class Interface:
                 next(self.run)
             except HRMError as err:
                 self.error = str(err)
+                self.menu = "press a key to exit..."
                 break
             except StopIteration:
                 self.idle = True
-                self.menu = "all done, press a key..."
+                self.menu = "all done, press a key to exit..."
                 break
         self.display()
         self.win.timeout(-1)

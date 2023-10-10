@@ -95,7 +95,7 @@ class Interface:
         self.menu = ["next", "play", "quit"]
         self.error = None
         self.idle = False
-        self.delay = 500
+        self.speed = 2
 
     def __enter__(self):
         self.win = curses.initscr()
@@ -124,7 +124,7 @@ class Interface:
             self.win.addch(y, self._wl+1, curses.ACS_VLINE)
         self.win.addch(0, self._wl+1, curses.ACS_TTEE)
         self.win.addch(self._h-1, self._wl+1, curses.ACS_BTEE)
-        title = " Human Resource Machine Interpreter "
+        title = " Human Resource Machine interpreter "
         pos = int(self._w / 2 - len(title) / 2)
         self.t(0, pos, f"[B:{title}]")
         self.win.addch(0, pos-1, curses.ACS_RTEE)
@@ -179,7 +179,7 @@ class Interface:
         else:
             self.t(self._h-3, 2, f"\U0001f92c [R:{self.error}]")
         # menu and rate
-        rate = f"{1000 / self.delay:.1f}".rstrip("0").rstrip(".")
+        rate = str(self.speed)
         pos = self._wl - len(rate) - 11
         self.t(self._h-1, pos, f" [B:+]/[B:-] {rate} op/s ")
         if isinstance(self.menu, list):
@@ -190,11 +190,16 @@ class Interface:
         #
         self.win.refresh()
 
+    _speeds = (1, 2, 3, 4, 5, 7, 10, 20, 50, 100)
+    _play_menu = {False: ["next", "play", "quit"],
+                  True: ["pause", "quit"]}
+
     def __call__(self):
         play = False
-        self.delay = 500
+        self.speed = 2
         while True:
             self.display()
+            self.win.timeout(int(1000 / self.speed) if play else -1)
             key = self.win.getch()
             if 32 <= key <= 254:
                 key = chr(key)
@@ -203,21 +208,15 @@ class Interface:
                 break
             elif key == "p":
                 play = not play
-                if play:
-                    self.win.timeout(self.delay)
-                    self.menu = ["pause", "quit"]
-                else:
-                    self.win.timeout(-1)
-                    self.menu = ["next", "play", "quit"]
+                self.menu = self._play_menu[play]
             elif key == "+" or key == curses.KEY_UP:
-                if self.delay <= 100:
-                    self.delay = max(10, self.delay - 10)
-                else:
-                    self.delay = max(100, self.delay - 100)
+                self.speed = min([s for s in self._speeds if s > self.speed]
+                                 or [self._speeds[-1]])
             elif key == "-" or key == curses.KEY_DOWN:
-                self.delay = min(1000, self.delay + 100)
+                self.speed = max([s for s in self._speeds if s < self.speed]
+                                 or [self._speeds[0]])
             elif key == "=":
-                self.delay = 500
+                self.speed = 2
             if not play and key != "n":
                 continue
             try:

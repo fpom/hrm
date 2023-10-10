@@ -6,3 +6,6 @@ upload:
 	python setup.py sdist
 	rm -rf *.egg-info
 	twine upload dist/*
+
+clean:
+	rm -rf build dist *.egg-info pdf __pycache__

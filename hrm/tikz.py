@@ -14,7 +14,7 @@ color = {"inbox" : "green",
          "jumpz" : "blue",
          "jumpn" : "blue"}
 label = {"inbox" : "\\raisebox{-.2ex}{\\ding{231}}\\texttt{inbox}",
-         "outbox" : "\\texttt{outbox}\,\\raisebox{-.2ex}{\\ding{231}}",
+         "outbox" : "\\texttt{outbox}\\,\\raisebox{-.2ex}{\\ding{231}}",
          "copyfrom" : "\\texttt{copyfrom}",
          "copyto" : "\\texttt{copyto}",
          "add" : "\\texttt{add}",

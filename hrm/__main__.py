@@ -1,7 +1,11 @@
-import argparse, sys, string, random
+import argparse
+import random
+import string
+import sys
 
-from . import HRM
-from .tikz import tikz, draw
+from . import HRM, HRMError
+from .tikz import draw, tikz
+from .tui import Interface
 
 epilog = """
 Option '-i 1,2,A,B,3' allows to run the program with the specified
@@ -14,10 +18,11 @@ between two commas leaves the corresponding tile empty.
 Exporting programs to PDF requires pdflatex with TikZ installed.
 """
 
-parser = argparse.ArgumentParser(prog="hrmi",
-                                 description="Human Resource Machine interpreter",
-                                 formatter_class=argparse.RawDescriptionHelpFormatter,
-                                 epilog=epilog.strip())
+parser = argparse.ArgumentParser(
+    prog="hrmi",
+    description="Human Resource Machine interpreter",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog=epilog.strip())
 parser.add_argument("-v", dest="verbose", default=False, action="store_true",
                     help="print messages while execution progresses")
 parser.add_argument("-p", dest="pdf", type=str, default=None, action="store",
@@ -36,75 +41,86 @@ parser.add_argument("-t", dest="tiles", type=str, default=None, action="store",
                     help="run with TILES given as comma-separated values")
 parser.add_argument("-q", dest="quit", default=False, action="store_true",
                     help="quit interpreter without running the program")
+parser.add_argument("-g", dest="gui", default=False, action="store_true",
+                    help="run (semi-)graphical user interface")
 parser.add_argument("prog", type=str, metavar="PROG", action="store",
                     help="program to be run")
 
-def main () :
+
+def main():
     args = parser.parse_args()
 
-    try :
+    try:
         run = HRM.parse(args.prog)
-    except AssertionError as err :
+    except HRMError as err:
         parser.exit(1, str(err))
 
-    if args.pdf is not None :
+    if args.pdf is not None:
         draw(args.prog, args.pdf)
 
-    if args.latex is not None :
+    if args.latex is not None:
         tikz(args.prog, args.latex, True)
 
-    if args.quit :
+    if args.quit:
         sys.exit(0)
 
     random.seed()
 
-    if args.inbox is not None :
+    if args.inbox is not None:
         inbox = args.inbox.split(",")
-        for i, v in enumerate(inbox) :
-            if len(v) == 1 and v in string.ascii_letters :
+        for i, v in enumerate(inbox):
+            if len(v) == 1 and v in string.ascii_letters:
                 inbox[i] = v.upper()
-            else :
-                try :
+            else:
+                try:
                     inbox[i] = int(v)
-                except :
+                except Exception:
                     parser.exit(2, f"invalid inbox value {v!r}")
-    else :
+    else:
         size = args.size or random.randint(10,20)
-        if args.positive :
+        if args.positive:
             MIN, MAX = 0, 20
-        else :
+        else:
             MIN, MAX = -20, 20
-        if args.numeric :
-            inbox = [random.randint(MIN,MAX) for _ in range(size)]
-        else :
-            inbox = [random.choice(list(range(MIN,MAX+1)) + list(string.ascii_uppercase))
+        if args.numeric:
+            inbox = [random.randint(MIN, MAX) for _ in range(size)]
+        else:
+            inbox = [random.choice(list(range(MIN, MAX+1))
+                                   + list(string.ascii_uppercase))
                      for _ in range(size)]
 
-    if args.tiles :
+    if args.tiles:
         tiles = args.tiles.split(",")
-        for i, v in enumerate(tiles) :
-            if not v :
+        for i, v in enumerate(tiles):
+            if not v:
                 tiles[i] = None
-            elif len(v) == 1 and v in string.ascii_letters :
+            elif len(v) == 1 and v in string.ascii_letters:
                 tiles[i] = v.upper()
-            else :
-                try :
+            else:
+                try:
                     tiles[i] = int(v)
-                except :
+                except Exception:
                     parser.exit(2, f"invalid tile value {v!r}")
-    else :
+    else:
         tiles = []
 
-    try :
-        if args.verbose :
-            print("<", *inbox)
-        outbox = run(inbox, tiles, args.verbose)
-        if args.verbose :
-            print(">", *outbox)
-        else :
-            print(*outbox)
-    except AssertionError as err :
-        parser.exit(1, str(err))
+    if args.gui:
+        with Interface(run, inbox, tiles) as gui:
+            global ui
+            ui = gui
+            gui()
+    else:
+        try:
+            if args.verbose:
+                print("<", *inbox)
+            outbox = run(inbox, tiles, args.verbose)
+            if args.verbose:
+                print(">", *outbox)
+            else:
+                print(*outbox)
+        except HRMError as err:
+            parser.exit(1, str(err))
 
-if __name__ == "__main__" :
+
+if __name__ == "__main__":
     main()

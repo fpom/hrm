@@ -61,8 +61,9 @@ class Prog:
                 self.width = max(self.width, len(lbl)+1)
             self.addr[num] = num + shift
             op, *args = cmd
-            self.prog.append(f"  [{self.hl[op]}:{op}] {' '.join(args)}")
-            self.width = max(self.width, 2 + len(" ".join(cmd)))
+            args = " ".join(str(a) for a in args)
+            self.prog.append(f"  [{self.hl[op]}:{op}] {args}")
+            self.width = max(self.width, 2 + len(op) + len(args))
 
     def __iter__(self):
         yield from self.prog
@@ -138,12 +139,13 @@ class Interface:
         x, y = 2, 7
         for num in range(100):
             val = self.hrm.state.get(num, "    ")
-            x += self.t(y, x, f"[M:{num:>2}:] {val}")
-            if x + 4 > self._wl:
+            inc = len(f"{num:>2} {val:<4}")
+            if x + inc >= self._wl - 1:
                 x = 2
                 y += 2
                 if y > self._h - 4:
                     break
+            x += self.t(y, x, f"[M:{num:>2}:] {val:<4}")
         # characters
         if self.idle:
             player = "\U0001f62c"

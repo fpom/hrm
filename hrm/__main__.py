@@ -43,6 +43,8 @@ parser.add_argument("-q", dest="quit", default=False, action="store_true",
                     help="quit interpreter without running the program")
 parser.add_argument("-g", dest="gui", default=False, action="store_true",
                     help="run (semi-)graphical user interface")
+parser.add_argument("-G", dest="gui", default=False, action="store_false",
+                    help="run (semi-)graphical user interface")
 parser.add_argument("prog", type=str, metavar="PROG", action="store",
                     help="program to be run")
 

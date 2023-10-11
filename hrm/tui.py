@@ -117,7 +117,7 @@ class Interface:
             return True
 
     def display(self):
-        self.win.clear()
+        self.win.erase()
         # frame
         self.win.border()
         for y in range(1, self._h-1):

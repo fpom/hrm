@@ -22,7 +22,8 @@ classifiers = [
 ]
 dependencies = [
     "colorama",
-    "textual",
+    "rich[all]",
+    "typer[all]",
 ]
 
 [project.urls]

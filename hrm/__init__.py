@@ -121,7 +121,8 @@ class HRM (object):
             self.ip += 1
             handler = getattr(self, f"op_{op.lower()}")
             done = handler(*args)
-            yield self.ip
+            if not done:
+                yield self.ip
 
     def __call__(self, inbox, floor=[], verbose=False):
         self.verbose = verbose

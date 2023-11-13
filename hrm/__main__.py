@@ -5,7 +5,7 @@ import sys
 
 from . import HRM, HRMError
 from .tikz import draw, tikz
-from .tui import Interface
+from .xui import main as xui
 
 epilog = """
 Option '-i 1,2,A,B,3' allows to run the program with the specified
@@ -79,7 +79,7 @@ def main():
                 except Exception:
                     parser.exit(2, f"invalid inbox value {v!r}")
     else:
-        size = args.size or random.randint(10,20)
+        size = args.size or random.randint(10, 20)
         if args.positive:
             MIN, MAX = 0, 20
         else:
@@ -107,10 +107,7 @@ def main():
         tiles = []
 
     if args.gui:
-        with Interface(run, inbox, tiles) as gui:
-            global ui
-            ui = gui
-            gui()
+        xui(run, inbox, tiles)
     else:
         try:
             if args.verbose:

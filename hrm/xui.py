@@ -14,6 +14,7 @@ from rich.columns import Columns
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.text import Text
 
 
 class RawKeyboard:
@@ -106,6 +107,7 @@ class TUI:
         self.con = live.console
         self.speed = 2
         self.idle = False
+        self.last_tile = None
         self._build_ui()
         live.update(Layout(self.panel))
 
@@ -122,11 +124,11 @@ class TUI:
             Layout("[bold green]Inbox:[/]  ", name="inbox", size=1),
             Layout("[bold green]Outbox:[/] ", name="outbox", size=1),
             Layout(" ", size=1),
-            Layout(":expressionless: ", name="hands", size=1),
+            Layout("[cyan]Worker:[/] ", name="hands", size=1),
             Layout(" ", size=1),
             Layout(" ", name="tiles", ratio=1),
             Layout(" ", size=1),
-            Layout(":rage: ", name="chief", size=1),
+            Layout("[red]Chief:[/] ", name="chief", size=1),
             Layout(" ", name="debug", size=1),
         )
         self.panel = Panel(
@@ -191,23 +193,25 @@ class TUI:
     def update_floor(self):
         state = self.hrm.state
         if used := [k for k in state if isinstance(k, int)]:
-            last = max(used)
+            if self.last_tile is not None:
+                used.append(self.last_tile)
+            last = self.last_tile = max(used)
         else:
-            last = 0
-        self["tiles"] = Columns([f"[yellow]{key:>3}:[/]"
-                                 f" {state.get(key, '   ')}"
-                                 for key in range(last + 1)])
+            last = self.last_tile
+        if last is None:
+            self["tiles"] = Columns([])
+        else:
+            self["tiles"] = Columns([Text.assemble((f"{key:>3}:", "yellow"),
+                                                   f" {state.get(key, ''):<3}")
+                                     for key in range(last + 1)],
+                                    equal=True)
 
     def update_hands(self):
-        if self.idle:
-            head = ":grimacing:"
-        else:
-            head = ":expressionless:"
         if self.hrm.hands is None:
             hands = ""
         else:
             hands = self.hrm.hands
-        self["hands"] = f"{head} {hands}"
+        self["hands"] = f"[cyan]Worker:[/] {hands}"
 
     _play_menu = {False: ["next", "play", "quit"],
                   True: ["pause", "quit"]}
@@ -246,7 +250,7 @@ class TUI:
                 next(run)
                 self.update()
             except HRMError as err:
-                self["chief"] = f":face_with_symbols_on_mouth: [red]{err}[/]"
+                self["chief"] = f"[bold red]Chief:[/] [red]{err}[/]"
                 self["menu"] = f"[blue]press a key to exit...[/]"
                 break
             except StopIteration:

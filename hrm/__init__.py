@@ -1,29 +1,63 @@
-# coding: utf-8
-
-import functools
 import inspect
 import json
 import pathlib
+import time
 
 from typing import Union
-
-from colorama import Fore as F
-from colorama import Style as S
+from rich.status import Status
+from rich.text import Text
+from rich.markup import escape
 
 from .parse import parse as hrmparse
 
-colors = {"inbox": F.GREEN,
-          "outbox": F.GREEN,
-          "copyfrom": F.RED,
-          "copyto": F.RED,
-          "add": F.YELLOW+S.DIM,
-          "sub": F.YELLOW+S.DIM,
-          "bumpup": F.YELLOW+S.DIM,
-          "bumpdn": F.YELLOW+S.DIM,
-          "jump": F.BLUE,
-          "jumpz": F.BLUE,
-          "jumpn": F.BLUE}
-op_width = max(len(v) for v in colors)
+colors = {"inbox": "green",
+          "outbox": "green",
+          "copyfrom": "red",
+          "copyto": "red",
+          "add": "yellow",
+          "sub": "yellow",
+          "bumpup": "yellow",
+          "bumpdn": "yellow",
+          "jump": "blue",
+          "jumpz": "blue",
+          "jumpn": "blue"}
+
+
+class Logger:
+    def __init__(self, status, width):
+        self.s = status
+        self.c = status.console
+        self.w = width
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+    _log_hands = {"copyfrom", "copyto", "add", "sub", "bumpup", "bumpdn"}
+
+    def __call__(self, op, args, hrm, err=None):
+        opargs = Text(" ".join(f"{x}" for x in (op, *args)),  style=colors[op])
+        opargs.align("left", self.w)
+        text = [opargs]
+        if err is not None:
+            more = Text.from_markup(f"[bold red]{err}[/]")
+        elif op in self._log_hands:
+            more = Text(f"{hrm.hands}")
+        elif op == "inbox":
+            if (hands := hrm.hands) is None:
+                more = Text.from_markup("[red]STOP[/]")
+            else:
+                more = Text(f"{hands}")
+        elif op == "outbox" and hrm.outbox:
+            more = Text(f"{hrm.outbox[-1]}")
+        else:
+            more = None
+        if more is not None:
+            text.append(Text.from_markup(" [dim]=>[/] "))
+            text.append(more)
+        self.c.print(Text.assemble(*text))
 
 
 class HRMError(Exception):
@@ -33,61 +67,23 @@ class HRMError(Exception):
             raise cls(message)
 
 
-def log(method):
-    name = method.__name__[3:]
-
-    @functools.wraps(method)
-    def wrapper(self, *args):
-        if self.verbose:
-            self.update = {"inbox": len(self.inbox),
-                           "outbox": len(self.outbox)}
-        err = None
-        try:
-            ret = method(self, *args)
-        except HRMError as exc:
-            err = exc
-        if self.verbose:
-            head = (colors[name]
-                    + " ".join([name]
-                               + [str(a) for a in args]).ljust(op_width + 3)
-                    + S.RESET_ALL)
-            if err:
-                print(head, f"😡 {err}")
-            elif ret is True:
-                print(head, "🛑")
-            else:
-                post = []
-                for key, val in self.update.items():
-                    if key == "inbox" and len(self.inbox) != val:
-                        post.append(f"📤 {self.hands}")
-                    elif key == "outbox" and len(self.outbox) != val:
-                        post.append(f"📥 {self.outbox[-1]}")
-                    elif isinstance(key, int):
-                        post.append(f"🔢 {key}←{val}")
-                    elif key == "ip":
-                        post.append(f"👉 {self.ip}")
-                    elif key == "hands":
-                        hands = self.hands if self.hands is not None else ''
-                        post.append(f"😬 {hands}")
-                print(head, " / ".join(post))
-        if err is not None:
-            raise err
-        else:
-            return ret
-
-    return wrapper
-
-
 class HRM (object):
     def __init__(self, prog, labels):
         self.prog = tuple(prog)
         self.labels = dict(labels)
         self.check()
-        self.verbose = False
 
     @classmethod
     def parse(cls, src):
         return cls(*hrmparse(src))
+
+    @classmethod
+    def level(cls, level):
+        path = pathlib.Path(__file__).parent / "levels.json"
+        for lvl in json.load(path.open()):
+            if lvl["number"] == level:
+                return lvl
+        raise ValueError(f"level {level} not found")
 
     @classmethod
     def from_level(cls, level):
@@ -107,13 +103,6 @@ class HRM (object):
         inbox = lvl["examples"][0]["inbox"]
         return cls.parse(sol["source"]), inbox, floor
 
-    @classmethod
-    def level(cls, level):
-        path = pathlib.Path(__file__).parent / "levels.json"
-        for lvl in json.load(path.open()):
-            if lvl["number"] == level:
-                return lvl
-
     def runlevel(self, level, example=0, verbose=False):
         if isinstance(level, int):
             level = self.level(level)
@@ -123,8 +112,9 @@ class HRM (object):
             floor = []
         return self(level["examples"][example]["inbox"], floor, verbose)
 
-    def iter(self, inbox, floor=[]):
-        self.state = {"ip": 0, "hands": None}
+    def iter(self, inbox, floor=[], log=None):
+        self.state = {}
+        self.state.update(ip=0, hands=None)
         if isinstance(floor, dict):
             self.state.update((int(k), v) for k, v in floor.items())
         else:
@@ -132,21 +122,35 @@ class HRM (object):
         self.inbox = list(inbox)
         self.outbox = []
         yield 0
-        done = False
-        while not done:
+        while True:
             if self.ip >= len(self.prog):
                 break
             op, *args = self.prog[self.ip]
+            op = op.lower()
             self.ip += 1
-            handler = getattr(self, f"op_{op.lower()}")
-            done = handler(*args)
-            if not done:
-                yield self.ip
+            handler = getattr(self, f"op_{op}")
+            try:
+                if handler(*args):
+                    if log is not None:
+                        log(op, args, self)
+                    break
+            except HRMError as err:
+                if log is not None:
+                    log(op, args, self, err)
+                raise
+            if log is not None:
+                log(op, args, self)
+            yield self.ip
 
-    def __call__(self, inbox, floor=[], verbose=False):
-        self.verbose = verbose
-        for _ in self.iter(inbox, floor):
-            pass
+    def __call__(self, inbox, floor=[], verbose=False, delay=0):
+        if verbose:
+            width = max(len(op) + sum(len(str(a)) for a in args) + len(args)
+                        for op, *args in self.prog)
+            with Status("working...") as status, Logger(status, width) as log:
+                for _ in self.iter(inbox, floor, log):
+                    time.sleep(delay)
+        else:
+            list(self.iter(inbox, floor))
         return self.outbox
 
     @property
@@ -210,29 +214,24 @@ class HRM (object):
                     HRMError.check(value in self.labels,
                                    f"undefined label {value}")
 
-    @log
     def op_inbox(self):
         if self.inbox:
             self.hands = self.inbox.pop(0)
         else:
             return True
 
-    @log
     def op_outbox(self):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         self.outbox.append(self.hands)
         self.hands = None
 
-    @log
     def op_copyfrom(self, addr: Union[int, list]):
         self.hands = self[addr]
 
-    @log
     def op_copyto(self, addr: Union[int, list]):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         self[addr] = self.hands
 
-    @log
     def op_add(self, addr: int):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         HRMError.check(isinstance(self.hands, int),
@@ -241,7 +240,6 @@ class HRM (object):
         HRMError.check(isinstance(val, int), f"cannot add value {val!r}")
         self.hands += val
 
-    @log
     def op_sub(self, addr: int):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         val = self[addr]
@@ -252,21 +250,18 @@ class HRM (object):
         else:
             raise HRMError(f"cannot sub {val!r} from {self.hands!r}")
 
-    @log
     def op_bumpup(self, addr: int):
         val = self[addr]
         HRMError.check(isinstance(val, int),
                        f"cannot increment value {self.hands!r}")
         self.hands = self[addr] = val + 1
 
-    @log
     def op_bumpdn(self, addr: int):
         val = self[addr]
         HRMError.check(isinstance(val, int),
                        f"cannot decrement value {self.hands!r}")
         self.hands = self[addr] = val - 1
 
-    @log
     def op_jump(self, lbl: str):
         HRMError.check(lbl in self.labels, f"labels {lbl} is not defined")
         pos = self.labels[lbl]
@@ -275,7 +270,6 @@ class HRM (object):
             return True
         self.ip = pos
 
-    @log
     def op_jumpz(self, lbl: str):
         HRMError.check(lbl in self.labels, f"labels {lbl} is not defined")
         pos = self.labels[lbl]
@@ -286,7 +280,6 @@ class HRM (object):
                 return True
             self.ip = pos
 
-    @log
     def op_jumpn(self, lbl: str):
         HRMError.check(lbl in self.labels, f"labels {lbl} is not defined")
         pos = self.labels[lbl]

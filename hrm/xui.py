@@ -8,7 +8,7 @@ import tty
 from collections import defaultdict
 from typing import Optional
 
-from . import HRMError
+from . import HRMError, colors
 
 from rich.columns import Columns
 from rich.layout import Layout
@@ -46,18 +46,6 @@ class RawKeyboard:
 
 
 class Prog:
-    hl = {"inbox": "green",
-          "outbox": "green",
-          "copyfrom": "red",
-          "copyto": "red",
-          "add": "yellow",
-          "sub": "yellow",
-          "bumpup": "yellow",
-          "bumpdn": "yellow",
-          "jump": "blue",
-          "jumpz": "blue",
-          "jumpn": "blue"}
-
     def __init__(self, hrm):
         self.prog = []
         self.addr = {}
@@ -74,7 +62,7 @@ class Prog:
             self.addr[num] = num + shift
             op, *args = cmd
             args = " ".join(str(a) for a in args)
-            self.prog.append(f"  [{self.hl[op]}]{op}[/] {args}")
+            self.prog.append(f"  [{colors[op]}]{op}[/] {args}")
             self.width = max(self.width, 2 + len(op) + len(args))
         self.addr[max(self.addr) + 1] = len(self.prog)
         self.prog.append("")

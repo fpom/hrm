@@ -46,6 +46,8 @@ parser.add_argument("-g", dest="gui", default=False, action="store_true",
                     help="run (semi-)graphical user interface")
 parser.add_argument("-G", dest="gui", default=False, action="store_false",
                     help="run (semi-)graphical user interface")
+parser.add_argument("-d", dest="delay", default=0, action="store", type=float,
+                    help="delay between operations in non-gui + verbose mode")
 parser.add_argument("prog", type=str, metavar="PROG", action="store",
                     help="program to be run")
 
@@ -121,13 +123,13 @@ def main():
         try:
             if args.verbose:
                 print("<", *inbox)
-            outbox = run(inbox, tiles, args.verbose)
+            outbox = run(inbox, tiles, args.verbose, args.delay)
             if args.verbose:
                 print(">", *outbox)
             else:
                 print(*outbox)
         except HRMError as err:
-            parser.exit(1, str(err))
+            parser.exit(1)
 
 
 if __name__ == "__main__":

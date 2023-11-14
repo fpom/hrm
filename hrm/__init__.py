@@ -10,8 +10,6 @@ from colorama import Style as S
 
 from .parse import parse as hrmparse
 
-VERSION = "1.3"
-
 colors = {"inbox": F.GREEN,
           "outbox": F.GREEN,
           "copyfrom": F.RED,
@@ -224,11 +222,11 @@ class HRM (object):
         self.hands = None
 
     @log
-    def op_copyfrom(self, addr: int):
+    def op_copyfrom(self, addr: int | list):
         self.hands = self[addr]
 
     @log
-    def op_copyto(self, addr: int):
+    def op_copyto(self, addr: int | list):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         self[addr] = self.hands
 

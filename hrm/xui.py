@@ -201,8 +201,14 @@ class TUI:
         if last is None:
             self["tiles"] = Columns([])
         else:
+            cols = []
+            for key in range(last + 1):
+                val = state.get(key, "")
+                if val is None:
+                    val = ""
+                cols.append(val)
             self["tiles"] = Columns([Text.assemble((f"{key:>3}:", "yellow"),
-                                                   f" {state.get(key, ''):<3}")
+                                                   f" {cols[key]:<3}")
                                      for key in range(last + 1)],
                                     equal=True)
 

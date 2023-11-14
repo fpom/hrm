@@ -1,52 +1,51 @@
-import curses
 import math
-import re
+import select
+import sys
+import termios
+import time
+import tty
 
 from collections import defaultdict
+from typing import Optional
 
-from . import HRMError
+from . import HRMError, colors
+
+from rich.columns import Columns
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 
 
-class Text:
-    def __init__(self, win):
-        self.win = win
-        self.pairs = {}
-        for num, color in enumerate(["white", "red", "green", "blue",
-                                     "yellow", "cyan", "magenta"],
-                                    start=1):
-            abbr = color[0].upper()
-            fg = getattr(curses, f"COLOR_{color.upper()}")
-            curses.init_pair(num, fg, curses.COLOR_BLACK)
-            self.pairs[abbr] = curses.color_pair(num)
+class RawKeyboard:
+    def __init__(self):
+        self.ios = [sys.stdin], [], []
+        self.old = termios.tcgetattr(sys.stdin)
 
-    _txt = re.compile(r"(\\\[|[^\[])|\[([WRGBYCM]):([^\]]+)\]")
+    def __enter__(self):
+        stdin = sys.stdin.fileno()
+        tty.setcbreak(stdin)
+        new = termios.tcgetattr(stdin)
+        new[3] = new[3] & ~termios.ECHO
+        termios.tcsetattr(stdin, termios.TCSADRAIN, new)
+        return self
 
-    def __call__(self, y, x, text):
-        c = 0
-        for match in self._txt.finditer(text):
-            raw, col, txt = match.groups()
-            txt = raw or txt
-            if col is None:
-                self.win.addstr(y, x+c, txt)
-            else:
-                self.win.addstr(y, x+c, txt, self.pairs[col])
-            c += len(txt)
-        return c
+    def getkey(self, timeout: Optional[int] = 0):
+        char = None
+        if select.select(*self.ios, timeout) == self.ios:
+            while select.select(*self.ios, 0) == self.ios:
+                c = sys.stdin.read(1)
+                if c == "\x1b":
+                    char = None
+                    break
+                char = c
+        return char
+
+    def __exit__(self, *_):
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old)
 
 
 class Prog:
-    hl = {"inbox": "G",
-          "outbox": "G",
-          "copyfrom": "R",
-          "copyto": "R",
-          "add": "Y",
-          "sub": "Y",
-          "bumpup": "Y",
-          "bumpdn": "Y",
-          "jump": "B",
-          "jumpz": "B",
-          "jumpn": "B"}
-
     def __init__(self, hrm):
         self.prog = []
         self.addr = {}
@@ -58,13 +57,15 @@ class Prog:
         for num, cmd in enumerate(hrm.prog):
             for lbl in labels[num]:
                 shift += 1
-                self.prog.append(f"[C:{lbl}:]")
+                self.prog.append(f"[cyan]{lbl}:[/]")
                 self.width = max(self.width, len(lbl)+1)
             self.addr[num] = num + shift
             op, *args = cmd
             args = " ".join(str(a) for a in args)
-            self.prog.append(f"  [{self.hl[op]}:{op}] {args}")
+            self.prog.append(f"  [{colors[op]}]{op}[/] {args}")
             self.width = max(self.width, 2 + len(op) + len(args))
+        self.addr[max(self.addr) + 1] = len(self.prog)
+        self.prog.append("")
 
     def clip(self, ip, count):
         size = len(self.prog)
@@ -81,154 +82,180 @@ class Prog:
             elif stop > size:
                 start, stop = size - count, size
             ipidx = mid - start
-            assert stop - start == count, f"{start=}, {mid=}, {stop=}, {size=}"
         for num, line in enumerate(self.prog[start:stop]):
             yield line, num == ipidx
 
 
-class Interface:
-    def __init__(self, hrm, inbox, floor=[]):
+class TUI:
+    def __init__(self, hrm, live, kbd):
         self.hrm = hrm
-        self.run = hrm.iter(inbox, floor)
-        next(self.run)
+        self.live = live
+        self.kbd = kbd
         self.prog = Prog(hrm)
-        self.menu = ["next", "play", "quit"]
-        self.error = None
-        self.idle = False
+        self.con = live.console
         self.speed = 2
+        self.idle = False
+        self.last_tile = None
+        self._build_ui()
+        live.update(Layout(self.panel))
 
-    def __enter__(self):
-        self.win = curses.initscr()
-        curses.start_color()
-        self.t = Text(self.win)
-        curses.noecho()
-        curses.curs_set(False)
-        curses.cbreak()
-        self.win.keypad(True)
-        self.win.clear()
-        self._h, self._w = self.win.getmaxyx()
-        self._wr = self.prog.width + 2
-        self._wl = self._w - self._wr - 4
-        return self
+    def _build_ui(self):
+        self.layout = layout = Layout()
+        layout.split_row(
+            Layout(name="state", ratio=1),
+            Layout(" ", size=1),
+            Layout(" ", name="cursor", size=1),
+            Layout(" ", size=1),
+            Layout(name="code", size=self.prog.width + 1)
+        )
+        layout["state"].split_column(
+            Layout("[bold green]Inbox:[/]  ", name="inbox", size=1),
+            Layout("[bold green]Outbox:[/] ", name="outbox", size=1),
+            Layout(" ", size=1),
+            Layout("[cyan]Worker:[/] ", name="hands", size=1),
+            Layout(" ", size=1),
+            Layout(" ", name="tiles", ratio=1),
+            Layout(" ", size=1),
+            Layout("[red]Chief:[/] ", name="chief", size=1),
+            Layout(" ", name="debug", size=1),
+        )
+        self.panel = Panel(
+            layout,
+            title="[bold blue]Human Resource Machine Interpreter[/]",
+            subtitle=("[bold blue]n[/]ext"
+                      " | [bold blue]p[/]lay"
+                      " | [bold blue]q[/]uit"
+                      " | [bold blue]+[/]/[bold blue]-[/] 2 op/s"),
+            subtitle_align="left"
+        )
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        curses.endwin()
-        if exc_type == KeyboardInterrupt:
-            return True
+    @property
+    def height(self):
+        return self.con.height
 
-    def display(self):
-        self.win.erase()
-        # frame
-        self.win.border()
-        for y in range(1, self._h-1):
-            self.win.addch(y, self._wl+1, curses.ACS_VLINE)
-        self.win.addch(0, self._wl+1, curses.ACS_TTEE)
-        self.win.addch(self._h-1, self._wl+1, curses.ACS_BTEE)
-        title = " Human Resource Machine interpreter "
-        pos = int(self._w / 2 - len(title) / 2)
-        self.t(0, pos, f"[B:{title}]")
-        self.win.addch(0, pos-1, curses.ACS_RTEE)
-        self.win.addch(0, pos + len(title), curses.ACS_LTEE)
-        # program
-        for num, (cmd, isip) in enumerate(self.prog.clip(self.hrm.ip,
-                                                         self._h-4)):
-            self.t(num+2, self._wl+3, cmd)
-            if isip:
-                self.win.addch(num + 2,
-                               self._wl + 1,
-                               curses.ACS_DIAMOND,
-                               self.t.pairs["C"])
-        # inbox and outbox
-        y = 2
+    def __setitem__(self, key, val):
+        if (handler := getattr(self, f"_set_{key}", None)) is not None:
+            handler(val)
+        else:
+            self.layout[key].update(val)
+
+    def _set_debug(self, txt):
+        self.layout["debug"].update(f"[dim]{txt}[/]")
+
+    def _set_cursor(self, pos):
+        head = "\n" * pos
+        self.layout["cursor"].update(f"{head}[red]:arrow_forward:[/]")
+
+    def _set_menu(self, menu):
+        if isinstance(menu, str):
+            self.panel.subtitle = menu
+        else:
+            menu = [f"[blue]{m[0]}[/]{m[1:]}" for m in menu]
+            menu.append(f"[blue]+[/]/[blue]-[/] {self.speed} op/s")
+            self.panel.subtitle = " | ".join(menu)
+
+    def update(self):
+        self.update_prog()
+        self.update_boxes()
+        self.update_floor()
+        self.update_hands()
+        self.live.refresh()
+
+    def update_prog(self):
+        lines = []
+        for pos, (lin, ptr) in enumerate(self.prog.clip(self.hrm.ip,
+                                                        self.height - 2)):
+            lines.append(lin)
+            if ptr:
+                self["cursor"] = pos
+        self["code"] = "\n".join(lines)
+
+    def update_boxes(self):
         for box in ("inbox", "outbox"):
-            self.t(y, 2, f"[G:{box.title()}:]")
-            pos = 9
             items = getattr(self.hrm, box)
             if box == "outbox":
                 items = items[::-1]
-            for val in items:
-                txt = f" {val}"
-                if pos + len(txt) + 3 > self._wl:
-                    self.t(y, pos, "...")
-                    break
-                self.t(y, pos, txt)
-                pos += len(txt)
-            y += 1
-        # tiles
-        x, y = 2, 7
-        for num in range(100):
-            val = self.hrm.state.get(num, "    ")
-            inc = len(f"{num:>2} {val:<4}")
-            if x + inc >= self._wl - 1:
-                x = 2
-                y += 2
-                if y > self._h - 4:
-                    break
-            x += self.t(y, x, f"[M:{num:>2}:] {val:<4}")
-        # characters
-        if self.idle:
-            player = "\U0001f62c"
-        else:
-            player = "\U0001f610"
-        if self.hrm.hands is None:
-            self.t(5, 2, player)
-        else:
-            self.t(5, 2, f"{player} {self.hrm.hands}")
-        if self.error is None:
-            self.t(self._h-3, 2, "\U0001f621")
-        else:
-            self.t(self._h-3, 2, f"\U0001f92c [R:{self.error}]")
-        # menu and rate
-        rate = str(self.speed)
-        pos = self._wl - len(rate) - 11
-        self.t(self._h-1, pos, f" [B:+]/[B:-] {rate} op/s ")
-        if isinstance(self.menu, list):
-            menu = " | ".join(f"[B:{m[0]}]{m[1:]}" for m in self.menu)
-        else:
-            menu = self.menu
-        self.t(self._h-1, 2, f" {menu} ")
-        #
-        self.win.refresh()
+            self[box] = (f"[green]{box.title()}:[/]".ljust(18)
+                         + " ".join(str(val) for val in items))
 
-    _speeds = (1, 2, 3, 4, 5, 7, 10, 20, 50, 100)
+    def update_floor(self):
+        state = self.hrm.state
+        if used := [k for k in state if isinstance(k, int)]:
+            if self.last_tile is not None:
+                used.append(self.last_tile)
+            last = self.last_tile = max(used)
+        else:
+            last = self.last_tile
+        if last is None:
+            self["tiles"] = Columns([])
+        else:
+            cols = []
+            for key in range(last + 1):
+                val = state.get(key, "")
+                if val is None:
+                    val = ""
+                cols.append(val)
+            self["tiles"] = Columns([Text.assemble((f"{key:>3}:", "yellow"),
+                                                   f" {cols[key]:<3}")
+                                     for key in range(last + 1)],
+                                    equal=True)
+
+    def update_hands(self):
+        if self.hrm.hands is None:
+            hands = ""
+        else:
+            hands = self.hrm.hands
+        self["hands"] = f"[cyan]Worker:[/] {hands}"
+
     _play_menu = {False: ["next", "play", "quit"],
                   True: ["pause", "quit"]}
+    _speeds = (1, 2, 3, 4, 5, 7, 10, 20, 50, 100)
 
-    def __call__(self):
+    def play(self, inbox, floor):
+        run = self.hrm.iter(inbox, floor)
+        next(run)
+        self.update()
         play = False
-        self.speed = 2
         while True:
-            self.display()
-            self.win.timeout(int(1000 / self.speed) if play else -1)
-            key = self.win.getch()
-            if 32 <= key <= 254:
-                key = chr(key)
+            if play:
+                key = self.kbd.getkey(1 / self.speed)
+            else:
+                key = self.kbd.getkey(None)
             if key == "q":
-                self.menu = "press a key to exit..."
+                self["menu"] = "[blue]press any key to exit...[/]"
                 break
             elif key == "p":
                 play = not play
-                self.menu = self._play_menu[play]
-            elif key == "+" or key == curses.KEY_UP:
+                self["menu"] = self._play_menu[play]
+            elif key == "+":
                 self.speed = min([s for s in self._speeds if s > self.speed]
                                  or [self._speeds[-1]])
-            elif key == "-" or key == curses.KEY_DOWN:
+                self["menu"] = self._play_menu[play]
+            elif key == "-":
                 self.speed = max([s for s in self._speeds if s < self.speed]
                                  or [self._speeds[0]])
+                self["menu"] = self._play_menu[play]
             elif key == "=":
                 self.speed = 2
+                self["menu"] = self._play_menu[play]
             if not play and key != "n":
                 continue
             try:
-                next(self.run)
+                next(run)
+                self.update()
             except HRMError as err:
-                self.error = str(err)
-                self.menu = "press a key to exit..."
+                self["chief"] = f"[bold red]Chief:[/] [red]{err}[/]"
+                self["menu"] = f"[blue]press a key to exit...[/]"
                 break
             except StopIteration:
                 self.idle = True
-                self.menu = "all done, press a key to exit..."
+                self["menu"] = "[blue]all done, press a key to exit...[/]"
                 break
-        self.display()
-        self.win.timeout(-1)
-        self.win.getch()
+        self.update()
+        self.kbd.getkey(None)
+
+
+def main(hrm, inbox, floor):
+    with RawKeyboard() as kbd, Live(screen=True) as live:
+        ui = TUI(hrm, live, kbd)
+        ui.play(inbox, floor)

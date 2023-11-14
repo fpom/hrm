@@ -1,68 +1,89 @@
-import io, pathlib
+import io
+import pathlib
 
 ops = {"inbox", "outbox", "copyfrom", "copyto", "add", "sub",
        "bumpup", "bumpdn", "jump", "jumpz", "jumpn"}
 
-def tokenize (src) :
-    if isinstance(src, io.TextIOBase) :
+
+class ParseError(Exception):
+    def __init__(self, lineno, message):
+        if lineno is None:
+            super().__init__(message)
+        else:
+            super().__init__(f"[{lineno}] {message}")
+        self.lineno = lineno
+        self.message = message
+
+    @classmethod
+    def check(cls, cond, lineno, message):
+        if not cond:
+            raise cls(lineno, message)
+
+
+def tokenize(src):
+    if isinstance(src, io.TextIOBase):
         stream = src
-    elif isinstance(src, str) :
+    elif isinstance(src, str):
         path = pathlib.Path(src)
-        if path.exists() :
+        if path.exists():
             stream = path.open()
-        else :
+        else:
             stream = io.StringIO(src)
-    else :
-        assert False, "invalid source"
+    else:
+        raise ParseError(None, "invalid source")
     text = stream.read()
     skip = False
     labels = set()
-    for num, (line, raw) in enumerate(((l.strip(), l) for l in text.splitlines()),
-                                      start=1) :
+    for num, (line, raw) in enumerate(((ln.strip(), ln)
+                                       for ln in text.splitlines()),
+                                      start=1):
         toks = line.split()
-        if skip :
-            if not line or line.endswith(";") :
+        if skip:
+            if not line or line.endswith(";"):
                 skip = False
-        elif not line :
+        elif not line:
             continue
-        elif toks and toks[0].lower() == "define" :
+        elif toks and toks[0].lower() == "define":
             skip = True
-        elif line.startswith("--") or (toks and toks[0].lower() == "comment") :
+        elif line.startswith("--") or (toks and toks[0].lower() == "comment"):
             continue
-        elif line.endswith(":") :
+        elif line.endswith(":"):
             lbl = line[:-1].strip()
-            assert lbl not in labels, (f"[{num}] parse error:"
-                                       f" duplicate label {raw!r}")
+            ParseError.check(lbl not in labels,
+                             num,
+                             f"parse error: duplicate label {raw!r}")
             labels.add(lbl)
             yield num, "lbl", lbl
-        else :
-            assert toks and (toks[0].lower() in ops), (f"[{num}] parse error:"
-                                                       f" unknown operation {raw!r}")
+        else:
+            ParseError.check(toks and (toks[0].lower() in ops),
+                             num,
+                             f"[{num}] parse error: unknown operation {raw!r}")
             toks[0] = toks[0].lower()
             yield num, "op", toks
 
-def parse (src) :
+
+def parse(src):
     prog = []
     labels = {}
-    for num, kind, obj in tokenize(src) :
-        if kind == "lbl" :
+    for num, kind, obj in tokenize(src):
+        if kind == "lbl":
             labels[obj] = len(prog)
-        elif kind == "op" :
+        elif kind == "op":
             op, *args = obj
             prog.append((num, [op] + args))
-    for pos, (num, cmd) in enumerate(prog) :
-        for i, a in enumerate(cmd[1:], start=1) :
-            if a in labels :
+    for pos, (num, cmd) in enumerate(prog):
+        for i, a in enumerate(cmd[1:], start=1):
+            if a in labels:
                 pass
-            elif a.startswith("[") and a.endswith("]") :
-                try :
+            elif a.startswith("[") and a.endswith("]"):
+                try:
                     cmd[i] = [int(a[1:-1])]
-                except :
-                    assert False, f"[{num}] parse error: invalid integer {a[1:-1]!r}"
-            else :
-                try :
+                except Exception:
+                    raise ParseError(num, f"invalid integer {a[1:-1]!r}")
+            else:
+                try:
                     cmd[i] = int(a)
-                except :
-                    assert False, f"[{num}] parse error: invalid integer {a!r}"
+                except Exception:
+                    raise ParseError(num, f"invalid integer {a!r}")
         prog[pos] = cmd
     return prog, labels

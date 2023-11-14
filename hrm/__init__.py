@@ -6,7 +6,6 @@ import time
 from typing import Union
 from rich.status import Status
 from rich.text import Text
-from rich.markup import escape
 
 from .parse import parse as hrmparse
 
@@ -35,7 +34,8 @@ class Logger:
     def __exit__(self, *_):
         pass
 
-    _log_hands = {"copyfrom", "copyto", "add", "sub", "bumpup", "bumpdn"}
+    _log_hands = {"inbox", "copyfrom", "copyto", "add", "sub",
+                  "bumpup", "bumpdn"}
 
     def __call__(self, op, args, hrm, err=None):
         opargs = Text(" ".join(f"{x}" for x in (op, *args)),  style=colors[op])
@@ -45,11 +45,6 @@ class Logger:
             more = Text.from_markup(f"[bold red]{err}[/]")
         elif op in self._log_hands:
             more = Text(f"{hrm.hands}")
-        elif op == "inbox":
-            if (hands := hrm.hands) is None:
-                more = Text.from_markup("[red]STOP[/]")
-            else:
-                more = Text(f"{hands}")
         elif op == "outbox" and hrm.outbox:
             more = Text(f"{hrm.outbox[-1]}")
         else:
@@ -69,7 +64,7 @@ class HRMError(Exception):
 
 class HRM (object):
     def __init__(self, prog, labels):
-        self.prog = tuple(prog)
+        self.prog = tuple((op.lower(), *args) for op, *args in prog)
         self.labels = dict(labels)
         self.check()
 
@@ -113,6 +108,8 @@ class HRM (object):
         return self(level["examples"][example]["inbox"], floor, verbose)
 
     def iter(self, inbox, floor=[], log=None):
+        if log is None:
+            log = self._dummy_log
         self.state = {}
         self.state.update(ip=0, hands=None)
         if isinstance(floor, dict):
@@ -121,28 +118,24 @@ class HRM (object):
             self.state.update(enumerate(floor))
         self.inbox = list(inbox)
         self.outbox = []
-        yield 0
-        while True:
-            if self.ip >= len(self.prog):
-                break
+        while 0 <= self.ip < len(self.prog):
+            yield self.ip
             op, *args = self.prog[self.ip]
-            op = op.lower()
             self.ip += 1
             handler = getattr(self, f"op_{op}")
             try:
                 if handler(*args):
-                    if log is not None:
-                        log(op, args, self)
+                    log(op, args, self, "STOP")
                     break
             except HRMError as err:
-                if log is not None:
-                    log(op, args, self, err)
+                log(op, args, self, err)
                 raise
-            if log is not None:
-                log(op, args, self)
-            yield self.ip
+            log(op, args, self)
 
-    def __call__(self, inbox, floor=[], verbose=False, delay=0):
+    def _dummy_log(self, *args):
+        pass
+
+    def __call__(self, inbox, floor=[], verbose=False, delay=0.0):
         if verbose:
             width = max(len(op) + sum(len(str(a)) for a in args) + len(args)
                         for op, *args in self.prog)
@@ -286,6 +279,6 @@ class HRM (object):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         HRMError.check(0 <= pos <= len(self.prog), f"invalid program position")
         if self.hands < 0:
-            if pos == len(self.prog):
+            if pos >= len(self.prog):
                 return True
             self.ip = pos

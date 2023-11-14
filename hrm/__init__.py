@@ -5,6 +5,8 @@ import inspect
 import json
 import pathlib
 
+from typing import Union
+
 from colorama import Fore as F
 from colorama import Style as S
 
@@ -222,11 +224,11 @@ class HRM (object):
         self.hands = None
 
     @log
-    def op_copyfrom(self, addr: int | list):
+    def op_copyfrom(self, addr: Union[int, list]):
         self.hands = self[addr]
 
     @log
-    def op_copyto(self, addr: int | list):
+    def op_copyto(self, addr: Union[int, list]):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         self[addr] = self.hands
 

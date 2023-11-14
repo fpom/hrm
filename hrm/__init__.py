@@ -89,7 +89,26 @@ class HRM (object):
     def parse(cls, src):
         return cls(*hrmparse(src))
 
-    def level(self, level):
+    @classmethod
+    def from_level(cls, level):
+        strlvl = str(level)
+        path = pathlib.Path(__file__).parent / "solutions.json"
+        solutions = json.load(path.open())
+        if strlvl not in solutions:
+            raise ValueError(f"missing level {level!r}")
+        sol = solutions[strlvl]
+        lvl = cls.level(level)
+        if lvl is None:
+            raise ValueError(f"missing level {level}")
+        if "floor" in lvl and "tiles" in lvl["floor"]:
+            floor = lvl["floor"]["tiles"]
+        else:
+            floor = []
+        inbox = lvl["examples"][0]["inbox"]
+        return cls.parse(sol["source"]), inbox, floor
+
+    @classmethod
+    def level(cls, level):
         path = pathlib.Path(__file__).parent / "levels.json"
         for lvl in json.load(path.open()):
             if lvl["number"] == level:

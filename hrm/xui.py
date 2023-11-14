@@ -75,6 +75,8 @@ class Prog:
             args = " ".join(str(a) for a in args)
             self.prog.append(f"  [{self.hl[op]}]{op}[/] {args}")
             self.width = max(self.width, 2 + len(op) + len(args))
+        self.addr[max(self.addr) + 1] = len(self.prog)
+        self.prog.append("")
 
     def clip(self, ip, count):
         size = len(self.prog)

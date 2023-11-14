@@ -1,4 +1,5 @@
 import argparse
+import pathlib
 import random
 import string
 import sys
@@ -51,9 +52,17 @@ parser.add_argument("prog", type=str, metavar="PROG", action="store",
 
 def main():
     args = parser.parse_args()
+    inbox = tiles = None
 
     try:
-        run = HRM.parse(args.prog)
+        if pathlib.Path(args.prog).exists():
+            run = HRM.parse(args.prog)
+        else:
+            try:
+                lvl = int(args.prog.split(":", 1)[1])
+            except Exception:
+                parser.exit(1, f"invalid program {args.prog}")
+            run, inbox, tiles = HRM.from_level(lvl)
     except HRMError as err:
         parser.exit(1, str(err))
 
@@ -68,7 +77,7 @@ def main():
 
     random.seed()
 
-    if args.inbox is not None:
+    if args.inbox is not None and inbox is None:
         inbox = args.inbox.split(",")
         for i, v in enumerate(inbox):
             if len(v) == 1 and v in string.ascii_letters:
@@ -78,7 +87,7 @@ def main():
                     inbox[i] = int(v)
                 except Exception:
                     parser.exit(2, f"invalid inbox value {v!r}")
-    else:
+    elif inbox is None:
         size = args.size or random.randint(10, 20)
         if args.positive:
             MIN, MAX = 0, 20
@@ -91,7 +100,7 @@ def main():
                                    + list(string.ascii_uppercase))
                      for _ in range(size)]
 
-    if args.tiles:
+    if args.tiles and tiles is None:
         tiles = args.tiles.split(",")
         for i, v in enumerate(tiles):
             if not v:
@@ -103,7 +112,7 @@ def main():
                     tiles[i] = int(v)
                 except Exception:
                     parser.exit(2, f"invalid tile value {v!r}")
-    else:
+    elif tiles is None:
         tiles = []
 
     if args.gui:

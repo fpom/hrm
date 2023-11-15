@@ -2,7 +2,6 @@ import math
 import select
 import sys
 import termios
-import time
 import tty
 
 from collections import defaultdict

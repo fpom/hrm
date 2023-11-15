@@ -50,6 +50,17 @@ def gen_inbox(length, neg, chars, bound):
     return [random.choice(values) for _ in range(length)]
 
 
+def build(prog, inbox, tiles, length, negative, chars, maxval):
+    if match := re.match(r"^(lvl|level):(\d+)$", prog, re.I):
+        hrm, inbox, tiles = HRM.from_level(int(match.group(2)))
+    else:
+        hrm = HRM.parse(prog)
+        if inbox is None:
+            inbox = gen_inbox(length, negative, chars, maxval)
+    assert isinstance(inbox, list)
+    return hrm, inbox, tiles
+
+
 @app.command(help="fully run a program and print its outbox")
 def run(prog: Annotated[
             str,
@@ -111,22 +122,13 @@ def run(prog: Annotated[
                 metavar="INT",
                 help="generate inbox with |values| <= INT"
             )] = 10):
-    if match := re.match(r"^(lvl|level):(\d+)$", prog, re.I):
-        hrm, inbox, tiles = HRM.from_level(int(match.group(2)))
-    else:
-        hrm = HRM.parse(prog)
-        if inbox is None:
-            inbox = gen_inbox(length, negative, chars, maxval)
-    assert isinstance(inbox, list)
+    hrm, inbox, tiles = build(prog, inbox, tiles,
+                              length, negative, chars, maxval)
     try:
-        if verbose:
-            rprint("[bold green]INBOX:[/]", *(Text(f"{i}") for i in inbox))
         outbox = hrm(inbox, tiles, verbose, delay)
-        if verbose:
-            rprint("[bold green]OUTBOX:[/]", *(Text(f"{i}") for i in inbox))
-        else:
+        if not verbose:
             print(*outbox)
-    except HRMError as err:
+    except HRMError:
         raise Exit(1)
 
 
@@ -184,7 +186,9 @@ def play(prog: Annotated[
                  metavar="INT",
                  help="generate inbox with |values| <= INT"
              )] = 10):
-    pass  # tui(run, inbox, tiles)
+    hrm, inbox, tiles = build(prog, inbox, tiles,
+                              length, negative, chars, maxval)
+    tui(hrm, inbox, tiles)
 
 
 if __name__ == "__main__":

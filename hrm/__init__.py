@@ -4,6 +4,7 @@ import pathlib
 import time
 
 from typing import Union
+from rich import print as rprint
 from rich.status import Status
 from rich.text import Text
 
@@ -107,6 +108,9 @@ class HRM (object):
             floor = []
         return self(level["examples"][example]["inbox"], floor, verbose)
 
+    def _dummy_log(self, *_):
+        pass
+
     def iter(self, inbox, floor=[], log=None):
         if log is None:
             log = self._dummy_log
@@ -132,16 +136,17 @@ class HRM (object):
                 raise
             log(op, args, self)
 
-    def _dummy_log(self, *args):
-        pass
-
     def __call__(self, inbox, floor=[], verbose=False, delay=0.0):
         if verbose:
+            rprint("[bold green]INBOX:[/]",
+                   *(Text(f"{i}") for i in inbox))
             width = max(len(op) + sum(len(str(a)) for a in args) + len(args)
                         for op, *args in self.prog)
             with Status("working...") as status, Logger(status, width) as log:
                 for _ in self.iter(inbox, floor, log):
                     time.sleep(delay)
+            rprint("[bold green]OUTBOX:[/]",
+                   *(Text(f"{i}") for i in self.outbox))
         else:
             list(self.iter(inbox, floor))
         return self.outbox
@@ -171,7 +176,8 @@ class HRM (object):
             HRMError.check(self.state.get(addr, None) is not None,
                            f"tile {addr} is empty")
             return self.state[addr]
-        elif isinstance(addr, list) and len(addr) == 1 and isinstance(addr[0], int):
+        elif isinstance(addr, list) and len(addr) == 1 \
+                and isinstance(addr[0], int):
             return self[self[addr[0]]]
         else:
             raise ValueError(f"invalid address {addr!r}")
@@ -184,7 +190,8 @@ class HRM (object):
             self.state["hands"] = update["hands"] = value
         elif isinstance(addr, int):
             self.state[addr] = update[addr] = value
-        elif isinstance(addr, list) and len(addr) == 1 and isinstance(addr[0], int):
+        elif isinstance(addr, list) and len(addr) == 1 \
+                and isinstance(addr[0], int):
             a = self[addr[0]]
             self[a] = update[a] = value
         else:
@@ -194,6 +201,7 @@ class HRM (object):
         for op, *args in self.prog:
             fun = getattr(self, f"op_{op.lower()}", None)
             HRMError.check(fun is not None, f"unknown operation {op}")
+            assert fun is not None  # for type checker
             sig = inspect.signature(fun)
             try:
                 bound = sig.bind(*args)

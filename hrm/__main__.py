@@ -2,7 +2,7 @@ import random
 import re
 import string
 
-from typing import Annotated, Optional, Union
+from typing import Annotated, Optional
 
 from typer import Typer, Option, Argument, Exit
 from rich import print as rprint
@@ -74,7 +74,7 @@ def run(prog: Annotated[
             )
         ] = False,
         inbox: Annotated[
-            Optional[list[Union[str, int]]],
+            Optional[list],
             Option(
                 "-i", "--inbox",
                 metavar="LIST",
@@ -82,7 +82,7 @@ def run(prog: Annotated[
                 help="inbox to use instead of generated one (eg, '1,2,1,B,3')"
             )] = None,
         tiles: Annotated[
-            list[Union[str, int]],
+            list,
             Option(
                 "-t", "--tiles",
                 metavar="LIST",
@@ -138,7 +138,7 @@ def play(prog: Annotated[
             Argument(
                 help="program to run: either a PATH to source or 'lvl:NUM'")],
          inbox: Annotated[
-             Optional[list[Union[str, int]]],
+             Optional[list],
              Option(
                  "-i", "--inbox",
                  metavar="LIST",
@@ -146,7 +146,7 @@ def play(prog: Annotated[
                  help="inbox to use instead of generated one (eg, '1,2,1,B,3')"
              )] = None,
          tiles: Annotated[
-             list[Union[str, int]],
+             list,
              Option(
                  "-t", "--tiles",
                  metavar="LIST",

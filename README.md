@@ -13,7 +13,7 @@ This library features a parser for this code, and CLI/TUI interpreters.
 
 ## Installation
 
-Just run `pip install hrm-interpreter` or clone the git repository and run `python setup.py install`.
+Just run `pip install hrm-interpreter` or clone the git repository and run `pip install`.
 
 ## Language
 

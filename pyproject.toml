@@ -30,7 +30,7 @@ dependencies = [
 "Bug Tracker" = "https://github.com/fpom/hrm/issues"
 
 [project.scripts]
-hrmi = "hrm.__main__:main"
+hrmi = "hrm.__main__:app"
 
 [tool.hatch.build.targets.wheel]
 only-include = ["hrm", "scripts"]

@@ -23,6 +23,8 @@ def intval(txt):
 
 
 def parse_tiles(text):
+    if isinstance(text, list):
+        return text
     items = []
     for val in text.split(","):
         if val == "":

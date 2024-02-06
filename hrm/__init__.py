@@ -3,7 +3,7 @@ import json
 import pathlib
 import time
 
-from typing import Union
+from typing import Union, get_origin, get_args
 from rich import print as rprint
 from rich.status import Status
 from rich.text import Text
@@ -209,8 +209,13 @@ class HRM (object):
                 raise HRMError(f"invalid arguments for {op}: {args}")
             for name, value in bound.arguments.items():
                 annot = sig.parameters[name].annotation
-                HRMError.check(isinstance(value, annot),
-                               f"invalid argument for {op}: {value}")
+                if get_origin(annot) is Union:
+                    HRMError.check(any(isinstance(value, a)
+                                       for a in get_args(annot)),
+                                   f"invalid argument for {op}: {value}")
+                else:
+                    HRMError.check(isinstance(value, annot),
+                                   f"invalid argument for {op}: {value}")
                 if annot is str:
                     HRMError.check(value in self.labels,
                                    f"undefined label {value}")

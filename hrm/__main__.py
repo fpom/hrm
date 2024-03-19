@@ -3,12 +3,13 @@ import re
 import string
 
 from typing import Annotated, Optional
+from pathlib import Path
 
 from typer import Typer, Option, Argument, Exit
 from rich import print as rprint
-from rich.text import Text
 
 from . import HRM, HRMError
+from .parse import ParseError
 from .tui import main as tui
 
 
@@ -53,12 +54,23 @@ def gen_inbox(length, neg, chars, bound):
 
 
 def build(prog, inbox, tiles, length, negative, chars, maxval):
-    if match := re.match(r"^(lvl|level):(\d+)$", prog, re.I):
-        hrm, inbox, tiles = HRM.from_level(int(match.group(2)))
-    else:
-        hrm = HRM.parse(prog)
-        if inbox is None:
-            inbox = gen_inbox(length, negative, chars, maxval)
+    try:
+        if match := re.match(r"^(lvl|level):(\d+)$", prog, re.I):
+            hrm, inbox, tiles = HRM.from_level(int(match.group(2)))
+        else:
+            hrm = HRM.parse(Path(prog))
+            if inbox is None:
+                inbox = gen_inbox(length, negative, chars, maxval)
+    except ParseError as err:
+        if "\n" in (msg := str(err)):
+            head, rest = msg.split("\n", 1)
+            rprint(f"[bold red]{head}[/]\n{rest.rstrip()}")
+        else:
+            rprint(f"[bold red]msg.rstrip()")
+        raise Exit(1)
+    except OSError as err:
+        rprint(f"[bold red]{err}")
+        raise Exit(1)
     assert isinstance(inbox, list)
     return hrm, inbox, tiles
 
@@ -69,12 +81,13 @@ def run(prog: Annotated[
             Argument(
                 help="program to run: either a PATH to source or 'lvl:NUM'")],
         verbose: Annotated[
-            bool,
+            int,
             Option(
                 "-v", "--verbose",
-                help="print operations as they are executed"
+                count=True,
+                help="print INBOX/OUTBOX, use '-vv' to print executed operations"
             )
-        ] = False,
+        ] = 0,
         inbox: Annotated[
             Optional[list],
             Option(

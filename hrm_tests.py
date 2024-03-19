@@ -1,54 +1,54 @@
 # coding: utf-8
 
-import json, collections, operator, sys, pathlib
-import tqdm
+import collections
+import json
+import operator
+import pathlib
+import sys
 
-from colorama import Fore as F, Style as S
+import tqdm
+from colorama import Fore as F
+from colorama import Style as S
 from IPython.core import ultratb
 
 from hrm import HRM
-from hrm.tikz import draw
 
 log = tqdm.tqdm(sorted(json.load(open("solutions/solutions.json")),
                        key=operator.itemgetter("levelNumber")))
 pdf_base = pathlib.Path("pdf")
 errors = collections.defaultdict(int)
 
-for sol in log :
+for sol in log:
     path = f"solutions/{sol['path']}"
-    try :
+    try:
         hrm = HRM.parse(path)
-    except :
+    except Exception as err:
         log.write(f"{F.RED}parse error:{S.RESET_ALL} {sol['path']}")
+        log.write(f"{S.DIM}{str(err).rstrip()}{S.RESET_ALL}")
         errors[f"{F.RED}parse error"] += 1
-    # draw code
-    pdf = (pdf_base / sol["path"]).with_suffix(".pdf")
-    pdf.parent.mkdir(parents=True, exist_ok=True)
-    try :
-        draw(path, pdf)
-    except :
-        log.write(f"{F.YELLOW}draw failed:{S.RESET_ALL} {sol['path']}")
-        errors[f"{F.YELLOW}draw failed"] += 1
+        continue
     # exec code
     num = sol["levelNumber"]
     lvl = hrm.level(num)
-    for ex, example in enumerate(lvl["examples"]) :
-        try :
+    for ex, example in enumerate(lvl["examples"]):
+        try:
             out = hrm.runlevel(lvl, ex)
-        except AssertionError as err :
+        except AssertionError as err:
             errors[f"{F.RED}invalid solution"] += 1
             log.write(f"{F.RED}{S.BRIGHT}invalid:{S.RESET_ALL} {sol['path']}")
             log.write(f"  😡 {F.RED}{S.DIM}{err}{S.RESET_ALL}")
             break
-        except :
+        except Exception:
             errors[f"{F.RED}crash"] = 1
             log.write(f"{F.RED}{S.BRIGHT}crashed:{S.RESET_ALL} {sol['path']}")
             vtb = ultratb.VerboseTB(color_scheme="Linux")
             log.write("\n".join(vtb.structured_traceback(*sys.exc_info())))
             break
-        if sol["successRatio"] == 1 and sol["worky"] and out != example["outbox"] :
+        if sol["successRatio"] == 1 \
+                and sol["worky"] \
+                and out != example["outbox"]:
             errors["{F.YELLOW}failed"] += 1
             log.write(f"{F.YELLOW}failed:{S.RESET_ALL} {sol['path']}")
 
-for err, count in errors.items() :
+for err, count in errors.items():
     print(f"=> {err}:{S.RESET_ALL} {count}")

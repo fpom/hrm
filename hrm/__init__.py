@@ -99,7 +99,7 @@ class HRM (object):
         inbox = lvl["examples"][0]["inbox"]
         return cls.parse(sol["source"]), inbox, floor
 
-    def runlevel(self, level, example=0, verbose=False):
+    def runlevel(self, level, example=0, verbose=0):
         if isinstance(level, int):
             level = self.level(level)
         if "floor" in level and "tiles" in level["floor"]:
@@ -136,19 +136,26 @@ class HRM (object):
                 raise
             log(op, args, self)
 
-    def __call__(self, inbox, floor=[], verbose=False, delay=0.0):
+    def __call__(self, inbox, floor=[], verbose=0, delay=0.0):
         if verbose:
-            rprint("[bold green]INBOX:[/]",
+            rprint("[bold green]INBOX:[/] ",
                    *(Text(f"{i}") for i in inbox))
+        if verbose > 1:
             width = max(len(op) + sum(len(str(a)) for a in args) + len(args)
                         for op, *args in self.prog)
             with Status("working...") as status, Logger(status, width) as log:
                 for _ in self.iter(inbox, floor, log):
                     time.sleep(delay)
+        else:
+            try:
+                list(self.iter(inbox, floor))
+            except HRMError as error:
+                if verbose:
+                    rprint(f"[red bold]error:[/] {error}")
+                raise
+        if verbose:
             rprint("[bold green]OUTBOX:[/]",
                    *(Text(f"{i}") for i in self.outbox))
-        else:
-            list(self.iter(inbox, floor))
         return self.outbox
 
     @property
@@ -238,7 +245,7 @@ class HRM (object):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         self[addr] = self.hands
 
-    def op_add(self, addr: int):
+    def op_add(self, addr: Union[int, list]):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         HRMError.check(isinstance(self.hands, int),
                        f"cannot add to value {self.hands!r}")
@@ -246,7 +253,7 @@ class HRM (object):
         HRMError.check(isinstance(val, int), f"cannot add value {val!r}")
         self.hands += val
 
-    def op_sub(self, addr: int):
+    def op_sub(self, addr: Union[int, list]):
         HRMError.check(self.hands is not None, f"you don't hold any value")
         val = self[addr]
         if isinstance(self.hands, int) and isinstance(val, int):
@@ -256,13 +263,13 @@ class HRM (object):
         else:
             raise HRMError(f"cannot sub {val!r} from {self.hands!r}")
 
-    def op_bumpup(self, addr: int):
+    def op_bumpup(self, addr: Union[int, list]):
         val = self[addr]
         HRMError.check(isinstance(val, int),
                        f"cannot increment value {self.hands!r}")
         self.hands = self[addr] = val + 1
 
-    def op_bumpdn(self, addr: int):
+    def op_bumpdn(self, addr: Union[int, list]):
         val = self[addr]
         HRMError.check(isinstance(val, int),
                        f"cannot decrement value {self.hands!r}")

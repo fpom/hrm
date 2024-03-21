@@ -4,8 +4,8 @@ import itertools
 import functools
 import string
 
-from .parse import parse
-from . import HRM, words
+from .parse import parse, LBLDEF
+from . import HRM, words, HRMError
 
 
 class Func:
@@ -85,6 +85,10 @@ class Source:
                                         if (a := s.strip())],
                                        g[2], self.meta)
 
+    def __getitem__(self, lno):
+        toks = self.tokens[self.onl[lno] - 1]
+        return "".join(str(t) for t in toks)
+
     def source(self, hide={}):
         lines = []
         for num, toks in enumerate(self.tokens, start=1):
@@ -107,6 +111,17 @@ class Source:
                 lines.append(Func.eval(f"f{h!r}", env))
         return "\n".join(lines)
 
+    @property
+    def regs(self):
+        return set(tok for line in self.tokens for tok in line
+                   if isinstance(tok, int))
+
+    @property
+    def labels(self):
+        return set(tok.sub(str(tok).rstrip(LBLDEF))
+                   for line in self.tokens
+                   for tok in line if tok.kind == "lbl")
+
     def rename(self, remap):
         for line in self.tokens:
             for i, tok in enumerate(line):
@@ -114,10 +129,8 @@ class Source:
                     line[i] = tok.sub(remap[tok])
 
     def randomize(self, names=words.animals, nregs=9):
-        regs = set(tok for line in self.tokens for tok in line
-                   if isinstance(tok, int))
-        lbls = set(tok for line in self.tokens for tok in line
-                   if tok.kind == "str")
+        regs = self.regs
+        lbls = self.labels
         nregs = max(nregs, len(regs))
         remap = {}
         remap.update(zip(regs, random.sample(range(nregs), len(regs))))
@@ -125,14 +138,19 @@ class Source:
         self.rename(remap)
         return remap
 
-    def check(self, *funcs, inbox="inbox"):
+    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=0):
         if not funcs:
             checkers = {k: v for k, v in self.meta.items()
                         if isinstance(v, Func)}
         else:
             checkers = {f: self.meta[f] for f in funcs}
         hrm = HRM.parse(self.source())
-        outbox = hrm(self.meta[inbox])
+        if isinstance(floor, str):
+            floor = self.meta[floor]
+        try:
+            outbox = hrm(self.meta[inbox], floor, maxsteps=maxsteps)
+        except HRMError as err:
+            raise CheckError(None, str(err))
         for name, chk in checkers.items():
             box = list(self.meta[inbox])
             if not len(box) % len(chk.args) == 0:
@@ -146,3 +164,49 @@ class Source:
                     expected.append(out)
             if outbox != expected:
                 raise CheckError(name, f"expected {expected} but got {outbox}")
+
+    _atl_op = {
+        "inbox": {"outbox"},
+        "outbox": {"inbox"},
+        "copyfrom": {"copyto"},
+        "copyto": {"copyfrom"},
+        "add": {"sub"},
+        "sub": {"add"},
+        "bumpup": {"bumpdn"},
+        "bumpdn": {"bumpup"},
+        "jump": {"jumpz", "jumpn"},
+        "jumpz": {"jump", "jumpn"},
+        "jumpn": {"jump", "jumpz"}}
+
+    def _alt(self, toks, ops, regs, labels):
+        if not toks:
+            yield []
+        else:
+            head, *tail = toks
+            if head in self._atl_op:
+                alt = ops
+            elif isinstance(head, int):
+                alt = regs
+            elif head.kind in ("str", "lbl"):
+                alt = labels
+            else:
+                alt = [head]
+            yield from ([a] + t
+                        for a in alt
+                        for t in self._alt(tail, ops, regs, labels))
+
+    def alt(self, lno, ops=True, regs=True, labels=True, strip=True):
+        toks = self.tokens[self.onl[lno] - 1]
+        # [] => original line is yielded first
+        _ops = [t for t in toks if t in self._atl_op]
+        if _ops and ops:
+            for op in _ops[:]:  # [:] => avoid changing list during iteration
+                _ops.extend(self._atl_op[op] - set(_ops))
+        _regs = [t for t in toks if isinstance(t, int)]
+        if _regs and regs:
+            _regs.extend(set(self.regs) - set(_regs))
+        _labels = [t for t in toks if t.kind in ("lbl", "str")]
+        if _labels and labels:
+            _labels.extend(set(self.labels) - set(_labels))
+        yield from ("".join(str(t) for t in alt).strip(None if strip else "\0")
+                    for alt in self._alt(toks, _ops, _regs, _labels))

@@ -63,6 +63,10 @@ class HRMError(Exception):
             raise cls(message)
 
 
+class HRMStepsError(HRMError):
+    pass
+
+
 class HRM (object):
     def __init__(self, prog, labels):
         self.prog = tuple((op.lower(), *args) for op, *args in prog)
@@ -111,7 +115,7 @@ class HRM (object):
     def _dummy_log(self, *_):
         pass
 
-    def iter(self, inbox, floor=[], log=None):
+    def iter(self, inbox, floor=[], log=None, maxsteps=0):
         if log is None:
             log = self._dummy_log
         self.state = {}
@@ -135,8 +139,10 @@ class HRM (object):
                 log(op, args, self, err)
                 raise
             log(op, args, self)
+            maxsteps -= 1
+            HRMStepsError.check(maxsteps != 0, "too many steps")
 
-    def __call__(self, inbox, floor=[], verbose=0, delay=0.0):
+    def __call__(self, inbox, floor=[], verbose=0, delay=0.0, maxsteps=0):
         if verbose:
             rprint("[bold green]INBOX:[/] ",
                    *(Text(f"{i}") for i in inbox))
@@ -144,11 +150,11 @@ class HRM (object):
             width = max(len(op) + sum(len(str(a)) for a in args) + len(args)
                         for op, *args in self.prog)
             with Status("working...") as status, Logger(status, width) as log:
-                for _ in self.iter(inbox, floor, log):
+                for _ in self.iter(inbox, floor, log, maxsteps):
                     time.sleep(delay)
         else:
             try:
-                list(self.iter(inbox, floor))
+                list(self.iter(inbox, floor, None, maxsteps))
             except HRMError as error:
                 if verbose:
                     rprint(f"[red bold]error:[/] {error}")

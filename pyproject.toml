@@ -1,17 +1,16 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools", "wheel", "Cython"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "hrm-interpreter"
-version = "1.4.2"
+version = "1.5"
 authors = [
   { name = "Franck Pommereau", email = "franck.pommereau@univ-evry.fr" },
 ]
 description = "Minimalist Human Resource Machine interpreter"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -21,20 +20,13 @@ classifiers = [
     "Operating System :: OS Independent"
 ]
 dependencies = [
-    "rich[all]",
+    "rich",
     "typer[all]",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/fpom/hrm"
+Homepage = "https://github.com/fpom/hrm"
 "Bug Tracker" = "https://github.com/fpom/hrm/issues"
 
 [project.scripts]
 hrmi = "hrm.__main__:app"
-
-[tool.hatch.build.targets.wheel]
-only-include = ["hrm", "scripts"]
-
-[tool.hatch.build.targets.wheel.sources]
-"src" = ""
-"scripts" = "hrm/*.json"

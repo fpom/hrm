@@ -12,6 +12,7 @@ from colorama import Style as S
 from IPython.core import ultratb
 
 from hrm import HRM
+from hrm.hrmx import HRMX, HRMXError
 
 log = tqdm.tqdm(sorted(json.load(open("solutions/solutions.json")),
                        key=operator.itemgetter("levelNumber")))
@@ -47,8 +48,40 @@ for sol in log:
         if sol["successRatio"] == 1 \
                 and sol["worky"] \
                 and out != example["outbox"]:
-            errors["{F.YELLOW}failed"] += 1
+            errors[f"{F.YELLOW}failed"] += 1
             log.write(f"{F.YELLOW}failed:{S.RESET_ALL} {sol['path']}")
+        # quick execution
+        inbox = lvl["examples"][ex]["inbox"]
+        if not all(isinstance(i, int) for i in inbox):
+            continue
+        if "floor" in lvl and "tiles" in lvl["floor"]:
+            floor = lvl["floor"]["tiles"]
+        else:
+            floor = []
+        if not all(isinstance(t, (int, type(None))) for t in floor):
+            continue
+        try:
+            hrmx = HRMX.compile(hrm.prog, hrm.labels)
+            out = hrmx(inbox, floor)
+        except HRMXError as err:
+            errors[f"{F.RED}(quick) failed"] += 1
+            log.write(f"{F.RED}{S.BRIGHT}(quick) failed:{S.RESET_ALL} {sol['path']}")
+            log.write(f"  😡 {F.RED}{S.DIM}{err}{S.RESET_ALL}")
+            log.write(f"  {S.DIM}INBOX: {','.join(str(i) for i in inbox)}{S.RESET_ALL}")
+            if floor:
+                log.write(f"  {S.DIM}TILES: {','.join(str(f) for f in floor)}{S.RESET_ALL}")
+            break
+        except Exception:
+            errors[f"{F.RED}(quick) crashed"] = 1
+            log.write(f"{F.RED}{S.BRIGHT}(quick) crashed:{S.RESET_ALL} {sol['path']}")
+            vtb = ultratb.VerboseTB(color_scheme="Linux")
+            log.write("\n".join(vtb.structured_traceback(*sys.exc_info())))
+            break
+        if sol["successRatio"] == 1 \
+                and sol["worky"] \
+                and out != example["outbox"]:
+            errors[f"{F.YELLOW}(quick) failed"] += 1
+            log.write(f"{F.YELLOW}(quick) failed:{S.RESET_ALL} {sol['path']}")
 
 for err, count in errors.items():
     print(f"=> {err}:{S.RESET_ALL} {count}")

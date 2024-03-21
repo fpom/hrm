@@ -1,6 +1,6 @@
 upload:
 	rm -rf dist
-	python -m build
+	python -m build --sdist
 	python -m twine upload dist/*
 
 clean:

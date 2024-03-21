@@ -1,8 +1,9 @@
 import io
 import re
 import pathlib
+import string
 
-ops = {"inbox": None,
+OPS = {"inbox": None,
        "outbox": None,
        "copyfrom": int,
        "copyto": int,
@@ -13,6 +14,8 @@ ops = {"inbox": None,
        "jump": str,
        "jumpz": str,
        "jumpn": str}
+
+LBLDEF = string.whitespace + ":"
 
 
 class ParseError(Exception):
@@ -52,26 +55,30 @@ class Tok(object):
         return obj
 
     def sub(self, new):
-        return self.__class__(new, self.kind, self.lineno, self.line, self.start, self.end)
+        return Tok.__new__(self.__class__, self.__class__.__base__,
+                           new, self.kind, self.lineno,
+                           self.line, self.start, self.end)
 
 
 class Str(str, Tok):
     def __new__(cls, value, kind, lineno, line, start, end):
-        return Tok.__new__(cls, str, str(value), kind, lineno, line, start, end)
+        return Tok.__new__(cls, str, str(value), kind, lineno,
+                           line, start, end)
 
 
 class Int(int, Tok):
     def __new__(cls, value, kind, lineno, line, start, end):
-        return Tok.__new__(cls, int, int(value), kind, lineno, line, start, end)
+        return Tok.__new__(cls, int, int(value), kind, lineno,
+                           line, start, end)
 
 
 class Parser:
     tokens = {
         "int": r"\b[0-9]+\b",
+        "lbl": r"\b[a-z]\w*\s*:",
         "str": r"\b[a-z]\w*",
         "lsb": r"\[",
         "rsb": r"\]",
-        "col": r":",
         "cmt": r"--.*"}
 
     def __init__(self):
@@ -110,15 +117,21 @@ class Parser:
                 yield Str(line[pos:start], "skip", lno, line, pos, start)
             if v.isdecimal():
                 yield Int(v, k, lno, line, start, end)
-            elif (hd := v.lower()) in ops:
+            elif (hd := v.lower()) in OPS:
                 yield Str(hd, "cmd", lno, line, start, end)
+            elif k == "lbl":
+                name = hd.rstrip(LBLDEF)
+                tail = hd[len(name):]
+                shift = len(name)
+                yield Str(name, "lbl", lno, line, start, start + shift)
+                yield Str(tail, "col", lno, line, start + shift, end)
             else:
                 yield Str(hd, k, lno, line, start, end)
             pos = end
         if pos < len(line):
             yield Str(line[pos:], "skip", lno, line, pos, len(line))
 
-    def tokenize(self, src, clean=True):
+    def tokenize(self, src):
         skip = False
         src = self.read(src)
         for lno, line in enumerate(src.splitlines(), start=1):
@@ -126,54 +139,45 @@ class Parser:
             if skip:
                 if not stripped or stripped.endswith(";"):
                     skip = False
-                if clean:
-                    continue
-                yield "skip", [Str(line, "skip", lno, line, 0, len(line))]
+                continue
             elif not stripped:
-                if clean:
-                    continue
-                yield "skip", [Str(line, "skip", lno, line, 0, len(line))]
+                continue
             else:
                 toks = list(self.tokenize_line(line, lno))
-                keep = [t for t in toks if t.kind not in ("skip", "cmt")]
+                for t in toks:
+                    if t.kind == "skip":
+                        ParseError.check(not str(t).strip(),
+                                         t, "unexpected token")
+                keep = [t for t in toks
+                        if t.kind not in ("skip", "cmt", "col")]
                 if not keep or keep[0] == "comment":
-                    if clean:
-                        continue
-                    yield "skip", toks
+                    continue
                 elif keep[0] == "define":
                     skip = True
-                    if clean:
-                        continue
-                    yield "skip", toks
-                elif keep[-1].kind == "col":
-                    if clean:
-                        yield "lbl", keep
-                    else:
-                        yield "lbl", toks
+                    continue
+                elif keep[0].kind == "lbl":
+                    yield "lbl", keep
                 else:
-                    if clean:
-                        yield "op", keep
-                    else:
-                        yield "op", toks
+                    yield "op", keep
 
     def __call__(self, src):
         prog = []
         labels = {}
-        for kind, toks in self.tokenize(src, True):
+        for kind, toks in self.tokenize(src):
             head, *tail = toks
             if kind == "lbl":
-                ParseError.check(tail == [":"], head, "invalid label definition")
+                ParseError.check(not tail, head, "invalid label definition")
                 ParseError.check(head not in labels, head, "duplicate label")
                 labels[head] = len(prog)
             elif kind == "op":
-                ParseError.check(head in ops, head, "unknown operation")
+                ParseError.check(head in OPS, head, "unknown operation")
                 if tail and tail[0].kind == "lsb":
                     ParseError.check(len(tail) == 3
                                      and tail[2].kind == "rsb",
                                      tail[0],
                                      f"invalid arguments")
                     tail = [[tail[1]]]
-                spec = ops[head]
+                spec = OPS[head]
                 if spec is None:
                     ParseError.check(not tail, head, "unexpected argument")
                     prog.append([head])
@@ -184,7 +188,8 @@ class Parser:
                 else:
                     arg = tail[0]
                     if spec is str:
-                        ParseError.check(isinstance(arg, str), arg, "invalid argument")
+                        ParseError.check(isinstance(arg, str),
+                                         arg, "invalid argument")
                     elif spec is int:
                         ParseError.check(isinstance(arg, int)
                                          or (isinstance(arg, list)

@@ -24,10 +24,7 @@ class ParseError(Exception):
             super().__init__(self, message)
             self.lineno = self.token = None
         else:
-            super().__init__(f"[{token.lineno}] {message}\n"
-                             f"  {token.line}\n"
-                             f"  {' ' * token.start}"
-                             f"{'^' * (token.end - token.start)}\n")
+            super().__init__(token.err(message))
             self.lineno = token.lineno
             self.token = token
         self.message = message
@@ -58,6 +55,11 @@ class Tok(object):
         return Tok.__new__(self.__class__, self.__class__.__base__,
                            new, self.kind, self.lineno,
                            self.line, self.start, self.end)
+
+    def err(self, msg):
+        return (f"[{self.lineno}] {msg}\n"
+                f"  {self.line}\n"
+                f"  {' ' * self.start}{'^' * (self.end - self.start)}\n")
 
 
 class Str(str, Tok):
@@ -199,6 +201,9 @@ class Parser:
                     else:
                         assert False
                     prog.append([head, arg])
+        for _, *args in prog:
+            if args and isinstance(args[0], str):
+                ParseError.check(args[0] in labels, args[0], "undefined label")
         return prog, labels
 
 

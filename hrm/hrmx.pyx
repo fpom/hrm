@@ -1,5 +1,55 @@
 from libc.stdlib cimport malloc, free
+from cython.operator cimport postincrement as _pp
 
+from .parse import parse as hrmparse
+
+#
+#
+#
+
+cdef class frozendict:
+    "immutable dict"
+    cdef dict d
+
+    def __cinit__(self, *args, **kargs):
+        self.d = dict(*args, **kargs)
+
+    def __iter__(self):
+        yield from self.d
+
+    def __len__(self):
+        return len(self.d)
+
+    def __getitem__(self, object key):
+        return self.d[key]
+
+    def __eq__(self, other):
+        if isinstance(other, frozendict):
+            return self.d == other.d
+        else:
+            return self.d == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __repr__(self):
+        return f"frozendict({self.d!r})"
+
+    cpdef object get(self, object key, object defaut=None):
+        return self.d.get(key, defaut)
+
+    cpdef object items(self):
+        return self.d.items()
+
+    cpdef object keys(self):
+        return self.d.keys()
+
+    cpdef object values(self):
+        return self.d.values()
+
+#
+# HRM operations
+#
 
 cdef enum Op:
     INBOX
@@ -19,41 +69,257 @@ cdef enum Op:
     JUMP
     JUMPN
     JUMPZ
-    QUIT
 
+# result of executing one operation
 cdef enum Stop:
-    OK = 0
+    DONE = 0
     EMPTY = 1
     CAPACITY = 2
     OUTBOUND = 3
     BADOP = 4
     STEPS = 5
 
-cdef enum ArgSpec:
-    NONE
-    IDX
-    PTR
-    LABEL
+# execute one operation
+#  - return Stop.STEPS if program may continue
+#  - Stop.DONE if program has fully executed
+#  - Stop.* if an error occurred
+cdef inline Stop step(HRMX hrm) noexcept nogil:
+    cdef int op, arg
+    cdef Stop s
+    cdef unsigned int idx
+    if hrm.ip == hrm.prog_len:
+        return Stop.DONE
+    elif hrm.ip > hrm.prog_len:
+        return Stop.OUTBOUND
+    op = hrm.prog[_pp(hrm.ip)]
+    if op == Op.INBOX:
+        if hrm.inbox_pos == hrm.inbox_len:
+            return Stop.DONE
+        hrm.hands = hrm.inbox[_pp(hrm.inbox_pos)]
+        hrm.hands_used = True
+    elif op == Op.OUTBOX:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.outbox_pos == hrm.capacity:
+            return Stop.CAPACITY
+        hrm.outbox[_pp(hrm.outbox_pos)] = hrm.hands
+        hrm.hands_used = False
+    elif op == Op.COPYFROMIDX:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands = hrm.tiles[idx]
+        hrm.hands_used = True
+    elif op == Op.COPYFROMPTR:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        idx = <unsigned int> hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands = hrm.tiles[idx]
+        hrm.hands_used = True
+    elif op == Op.COPYTOIDX:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        hrm.tiles[idx] = hrm.hands
+        hrm.tiles_used[idx] = True
+    elif op == Op.COPYTOPTR:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        idx = <unsigned int> hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        hrm.tiles[idx] = hrm.hands
+        hrm.tiles_used[idx] = True
+    elif op == Op.ADDIDX:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands += hrm.tiles[idx]
+    elif op == Op.ADDPTR:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        idx = hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands += hrm.tiles[idx]
+    elif op == Op.SUBIDX:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands -= hrm.tiles[idx]
+    elif op == Op.SUBPTR:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        idx = hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if not hrm.tiles_used[idx]:
+            return Stop.EMPTY
+        hrm.hands -= hrm.tiles[idx]
+    elif op == Op.BUMPUPIDX:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        arg = hrm.tiles[idx]
+        hrm.hands = hrm.tiles[idx] = arg + 1
+        hrm.hands_used = True
+    elif op == Op.BUMPUPPTR:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        idx = hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        arg = hrm.tiles[idx]
+        hrm.hands = hrm.tiles[idx] = arg + 1
+        hrm.hands_used = True
+    elif op == Op.BUMPDNIDX:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        arg = hrm.tiles[idx]
+        hrm.hands = hrm.tiles[idx] = arg - 1
+        hrm.hands_used = True
+    elif op == Op.BUMPDNPTR:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        idx = hrm.tiles[idx]
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        if idx >= hrm.capacity:
+            return Stop.OUTBOUND
+        arg = hrm.tiles[idx]
+        hrm.hands = hrm.tiles[idx] = arg - 1
+        hrm.hands_used = True
+    elif op == Op.JUMP:
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[hrm.ip]
+        hrm.ip = idx
+    elif op == Op.JUMPZ:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if hrm.hands == 0:
+            hrm.ip = idx
+    elif op == Op.JUMPN:
+        if not hrm.hands_used:
+            return Stop.EMPTY
+        if hrm.ip >= hrm.prog_len:
+            return Stop.OUTBOUND
+        idx = <unsigned int> hrm.prog[_pp(hrm.ip)]
+        if hrm.hands < 0:
+            hrm.ip = idx
+    else:
+        return Stop.BADOP
+    return Stop.STEPS
 
+#
+# errors during program execution
+#
 
-class HRMXError(Exception):
-    def __init__(self, Stop errno):
-        if errno == Stop.OK:
-            super().__init__("no error (this is a bug)")
-        elif errno == Stop.EMPTY:
-            super().__init__("empty register")
-        elif errno == Stop.CAPACITY:
-            super().__init__("capacity exceeded")
-        elif errno == Stop.OUTBOUND:
-            super().__init__("out of boundary array access")
-        elif errno == Stop.BADOP:
-            super().__init__("invalid operation")
-        elif errno == Stop.STEPS:
-            super().__init__("maximum number of steps exceeded")
+class HRMProgramError(Exception):
+    """Error during a program execution
+
+    Attributes:
+     - `errno`: error number
+     - `strerror`: map error numbers to strings
+    """
+    strerror = {Stop.DONE: "no error",
+                Stop.EMPTY: "empty register",
+                Stop.CAPACITY: "capacity exceeded",
+                Stop.OUTBOUND: "out of boundary access",
+                Stop.BADOP: "invalid operation",
+                Stop.STEPS: "maximum number of steps exceeded"}
+
+    def __init__(self, errno, op=None, arg=None):
+        if op is not None and arg is not None:
+            ctx = " in '{op} {arg}' (line {op.lineno})"
+        elif op is not None:
+            ctx = " in '{op}' (line {op.lineno})"
         else:
-            super().__init__("unknown error (this is a bug)")
+            ctx = ""
+        super().__init__(self.strerror[errno] + ctx)
+        self.errno = errno
 
+#
+# static info to encode operations
+#
 
+# op name to Op translation
 cdef dict opop = {"inbox": Op.INBOX,
                   "outbox": Op.OUTBOX,
                   "copyfrom": (Op.COPYFROMIDX, Op.COPYFROMPTR),
@@ -66,52 +332,47 @@ cdef dict opop = {"inbox": Op.INBOX,
                   "jumpz": Op.JUMPZ,
                   "jumpn": Op.JUMPN}
 
-cdef dict opspec = {Op.INBOX: ("inbox", ArgSpec.NONE),
-                    Op.OUTBOX: ("outbox", ArgSpec.NONE),
-                    Op.COPYFROMIDX: ("copyfrom", ArgSpec.IDX),
-                    Op.COPYFROMPTR: ("copyfrom", ArgSpec.PTR),
-                    Op.COPYTOIDX: ("copyto", ArgSpec.IDX),
-                    Op.COPYTOPTR: ("copyto", ArgSpec.PTR),
-                    Op.ADDIDX: ("add", ArgSpec.IDX),
-                    Op.ADDPTR: ("add", ArgSpec.PTR),
-                    Op.SUBIDX: ("sub", ArgSpec.IDX),
-                    Op.SUBPTR: ("sub", ArgSpec.PTR),
-                    Op.BUMPDNIDX: ("bumpup", ArgSpec.IDX),
-                    Op.BUMPUPPTR: ("bumpup", ArgSpec.PTR),
-                    Op.BUMPDNIDX: ("bumpdn", ArgSpec.IDX),
-                    Op.BUMPDNPTR: ("bumpdn", ArgSpec.PTR),
-                    Op.JUMP: ("jump", ArgSpec.LABEL),
-                    Op.JUMPZ: ("jumpz", ArgSpec.LABEL),
-                    Op.JUMPN: ("jumpn", ArgSpec.LABEL),
-                    Op.QUIT: ("<quit>", ArgSpec.NONE)}
-
+#
+# main class
+#
 
 cdef class HRMX:
+    # arrays length
     cdef unsigned int capacity
+    # encoded program
     cdef int* prog
     cdef unsigned int prog_len
+    # instruction pointer
     cdef unsigned int ip
+    # inbox
     cdef int* inbox
     cdef unsigned int inbox_pos
     cdef unsigned int inbox_len
+    # outbox
     cdef int* outbox
     cdef unsigned int outbox_pos
+    # registers
     cdef int* tiles
     cdef bint* tiles_used
+    # hands
     cdef int hands
     cdef bint hands_used
+    # info about programm (labels => addr, op num => addr, addr => original op)
+    cdef readonly frozendict labels, addr
+    cdef dict srcop
 
-    def __cinit__(self, list prog, unsigned int capacity=512):
-        cdef unsigned int i
+    def __cinit__(self, prog=None, labels=None, unsigned int capacity=512):
         self.capacity = capacity
-        self.prog_len = len(prog)
-        self.prog = <int*> malloc(self.prog_len * sizeof(int))
-        for i in range(self.prog_len):
-            self.prog[i] = prog[i]
+        self.prog = <int*> malloc(capacity * sizeof(int))
         self.inbox = <int*> malloc(capacity * sizeof(int))
         self.outbox = <int*> malloc(capacity * sizeof(int))
         self.tiles = <int*> malloc(capacity * sizeof(int))
         self.tiles_used = <bint*> malloc(capacity * sizeof(bint))
+        self.labels = frozendict()
+        self.addr = frozendict()
+        self.srcop = {}
+        self.prog_len = self.ip = 0
+        self.inbox_len = self.inbox_pos = self.outbox_pos = 0
 
     def __dealloc__(self):
         free(self.prog)
@@ -121,344 +382,167 @@ cdef class HRMX:
         free(self.tiles_used)
 
     @classmethod
-    def compile(cls, prog, dict labels, unsigned int capacity=512):
-        cdef dict lbl = {}
-        cdef unsigned int num
-        cdef list p = []
-        for num, (op, *args) in enumerate(prog):
-            lbl[num] = len(p)
+    def parse(cls, src, unsigned int capacity=512):
+        return cls(*hrmparse(src), capacity)
+
+    def __init__(self, prog=None, labels=None, unsigned int capacity=512):
+        """Create a new HRM executor
+
+        If `prog` and `labels` are passed, the program is directly loaded,
+        otherwise method `load` has to be used to do so.
+
+        Arguments:
+         - `prog: list = None`: program as returned by the parser
+         - `labels: dict = None`: labels positions in the program, as returned by the parser
+         - `capacity: int = 512`: memories sizes (inbox, outbox, program, registers)
+        """
+        if prog is not None:
+            self.load(prog, labels)
+        elif labels is not None:
+            raise ValueError("unexpected argument 'labels' when 'prog' is None")
+
+    cpdef unsigned int load(self, prog, labels):
+        """Load a program into the executor
+
+        Arguments:
+         - `prog: list = None`: program as returned by the parser
+         - `labels: dict = None`: labels positions in the program, as returned by the parser
+
+        Return: the length of the loaded program, after encoding
+        """
+        cdef unsigned int n
+        cdef unsigned int p = 0
+        cdef dict lbls = {}
+        cdef object op, k
+        cdef list args
+        if 2 * len(prog) > self.capacity:
+            # this is an over approximation but should be DONE in general
+            raise ValueError("program too long")
+        self.ip = 0
+        self.inbox_pos = self.inbox_len = 0
+        self.outbox_pos = 0
+        self.addr.d.clear()
+        self.labels.d.clear()
+        for n, (op, *args) in enumerate(prog):
+            self.addr.d[n] = p
             if not args:
-                p.append(opop[op])
+                self.prog[_pp(p)] = opop[op]
+                self.srcop[p] = (op, None)
             elif isinstance(args[0], str):
-                p.append(opop[op])
-                p.append(args[0])
+                self.prog[_pp(p)] = opop[op]
+                lbls[_pp(p)] = args[0]
+                self.srcop[p] = (op, args[0])
             elif isinstance(args[0], int):
-                p.append(opop[op][0])
-                p.append(args[0])
+                self.prog[_pp(p)] = opop[op][0]
+                self.prog[_pp(p)] = args[0]
+                self.srcop[p] = (op, args[0])
             elif isinstance(args[0], list):
-                p.append(opop[op][1])
-                p.append(args[0][0])
+                self.prog[_pp(p)] = opop[op][1]
+                self.prog[_pp(p)] = args[0][0]
+                self.srcop[p] = (op, args[0])
             else:
                 raise ValueError("invalid program")
-        lbl[len(prog)] = len(p)
-        p.append(Op.QUIT)
-        for num, obj in enumerate(p):
-            if isinstance(obj, str):
-                p[num] = lbl[labels[obj]]
-        return cls(p, capacity)
+        self.prog_len = self.addr.d[len(prog)] = p
+        for p, k in lbls.items():
+            self.prog[p] = self.labels.d[k] = self.addr.d[labels[k]]
+        return self.prog_len
 
-    cdef unsigned int print_op(self, unsigned int ip):
-        cdef str mnemo
-        cdef ArgSpec spec
-        cdef op = self.prog[ip]
-        mnemo, spec = opspec[op]
-        if spec == ArgSpec.NONE:
-            print(f"{ip:>3}: {mnemo}")
-            return 1
-        elif spec == ArgSpec.IDX:
-            arg = self.prog[ip+1]
-            print(f"{ip:>3}: {mnemo} {arg}")
-            return 2
-        elif spec == ArgSpec.PTR:
-            arg = self.prog[ip+1]
-            print(f"{ip:>3}: {mnemo} [{arg}]")
-            return 2
-        elif spec == ArgSpec.LABEL:
-            arg = self.prog[ip+1]
-            print(f"{ip:>3}: {mnemo} @{arg}")
-            return 2
+    cpdef void boot(self, inbox, tiles=[]):
+        """Start the executor with a given context
 
-    def print(self):
-        cdef unsigned int ip = 0
-        cdef unsigned int i
-        cdef int t
-        print("=" * 20)
-        while ip < self.prog_len:
-            if ip == self.ip:
-                print("=> ", end="")
-            elif ip+1 == self.ip:
-                print("-> ", end="")
-            else:
-                print("   ", end="")
-            ip += self.print_op(ip)
-        print("=" * 20)
-        if self.hands_used:
-            print("hands: <empty>")
-        else:
-            print("hands: {self.hands}")
-        print("inbox:",
-              ",".join(str(self.inbox[i]) 
-                       for i in range(self.inbox_pos, self.inbox_len)))
-        print("outbox:", ",".join(str(self.outbox[i])
-                                      for i in range(self.outbox_pos)))
-        t = self.capacity
-        while t >= 0:
-            t -= 1
-            if self.tiles_used[t]:
-                break
-        if t >= 0:
-            print("tiles: ", end="")
-            for i in range(t+1):
-                if self.tiles_used[i]:
-                    print(self.tiles[i], end="")
-                else:
-                    print("_", end="")
-                if <unsigned int> t == i:
-                    print("")
-                else:
-                    print(",", end="")
-        print("=" * 20)
-
-    def __call__(self, list inbox, list tiles=[],
-                 int verbose=0, unsigned int maxsteps=1024):
+        Arguments:
+         - `inbox: list`: inbox to be processed
+         - `tiles: list = []`: initial content of the registers,
+           with `None` where a tile has to be left empty
+        """
         cdef unsigned int i
         cdef int v
+        cdef object t
+        if self.prog_len == 0:
+            raise ValueError("no program loaded")
         if len(inbox) > self.capacity:
             raise ValueError("inbox too large")
         if len(tiles) > self.capacity:
             raise ValueError("too many tiles")
-        self.ip = 0
-        self.inbox_pos = 0
-        self.outbox_pos = 0
         for i in range(self.capacity):
             self.tiles_used[i] = False
         self.hands_used = False
         for i, v in enumerate(inbox):
             self.inbox[i] = v
         self.inbox_len = len(inbox)
-        if tiles:
-            for i, t in enumerate(tiles):
-                if t is not None:
-                    self.tiles[i] = t
-                    self.tiles_used[i] = True
-        cdef Stop s = self.run(maxsteps, verbose > 1)
-        if s == Stop.OK:
+        for i, t in enumerate(tiles):
+            if t is not None:
+                self.tiles[i] = t
+                self.tiles_used[i] = True
+        self.ip = self.inbox_pos = self.outbox_pos = 0
+
+    def __call__(self, inbox=None, tiles=[], unsigned int maxsteps=1024):
+        """Execute a program
+
+        If not `inbox` is provided, method `boot` has to be called.
+        The program is executed until its end, or `maxsteps` operations have been
+        executed.
+        
+        Arguments:
+         - `inbox: list[int] | None = None`: if not `None`, `inbox` is passed to `boot`
+         - `tiles: list[int | None] = []`: is `inbox` is not `None`, `tiles` is also passed to `boot`
+         - `maxsteps: int = 1024`: maximum number of operations that can be executed
+
+        Return: produced outbox if program executes to its end, or raise `HRMProgramError`
+        if `maxsteps` is reached (or another error occurred).
+        """
+        cdef unsigned int i, ip
+        cdef Stop stop
+        if self.prog_len == 0:
+            raise ValueError("no program loaded")
+        if inbox is not None:
+            self.boot(inbox, tiles)
+        if self.inbox_len == 0:
+            raise ValueError("no inbox given")
+        with nogil:
+            for i in range(maxsteps):
+                ip = self.ip
+                stop = step(self)
+                if stop != Stop.STEPS:
+                    break
+            else:
+                stop = Stop.STEPS
+        if stop == Stop.DONE:
             return [self.outbox[i] for i in range(self.outbox_pos)]
         else:
-            if verbose > 1:
-                self.print()
-            raise HRMXError(s)
+            raise HRMProgramError(stop, *self.srcop.get(ip, (None, None)))
 
-    cdef Stop run(self, unsigned int maxsteps, bint trace) nogil:
-        cdef int op, arg
-        cdef unsigned int s, idx
-        for s in range(maxsteps):
-            if self.ip >= self.prog_len:
-                return Stop.OUTBOUND
-            if trace:
-                with gil:
-                    self.print_op(self.ip)
-            op = self.prog[self.ip]
-            self.ip += 1
-            if op == Op.QUIT:
-                return Stop.OK
-            elif op == Op.INBOX:
-                if self.inbox_pos == self.inbox_len:
-                    return Stop.OK
-                self.hands = self.inbox[self.inbox_pos]
-                self.inbox_pos += 1
-                self.hands_used = True
-            elif op == Op.OUTBOX:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.outbox_pos == self.capacity:
-                    return Stop.CAPACITY
-                self.outbox[self.outbox_pos] = self.hands
-                self.outbox_pos += 1
-                self.hands_used = False
-            elif op == Op.COPYFROMIDX:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands = self.tiles[idx]
-                self.hands_used = True
-            elif op == Op.COPYFROMPTR:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                idx = <unsigned int> self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands = self.tiles[idx]
-                self.hands_used = True
-            elif op == Op.COPYTOIDX:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                self.tiles[idx] = self.hands
-                self.tiles_used[idx] = True
-            elif op == Op.COPYTOPTR:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                idx = <unsigned int> self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                self.tiles[idx] = self.hands
-                self.tiles_used[idx] = True
-            elif op == Op.ADDIDX:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands += self.tiles[idx]
-            elif op == Op.ADDPTR:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                idx = self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands += self.tiles[idx]
-            elif op == Op.SUBIDX:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands -= self.tiles[idx]
-            elif op == Op.SUBPTR:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                idx = self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if not self.tiles_used[idx]:
-                    return Stop.EMPTY
-                self.hands -= self.tiles[idx]
-            elif op == Op.BUMPUPIDX:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                arg = self.tiles[idx]
-                self.hands = self.tiles[idx] = arg + 1
-                self.hands_used = True
-            elif op == Op.BUMPUPPTR:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                idx = self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                arg = self.tiles[idx]
-                self.hands = self.tiles[idx] = arg + 1
-                self.hands_used = True
-            elif op == Op.BUMPDNIDX:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                arg = self.tiles[idx]
-                self.hands = self.tiles[idx] = arg - 1
-                self.hands_used = True
-            elif op == Op.BUMPDNPTR:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                idx = self.tiles[idx]
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                if idx >= self.capacity:
-                    return Stop.OUTBOUND
-                arg = self.tiles[idx]
-                self.hands = self.tiles[idx] = arg - 1
-                self.hands_used = True
-            elif op == Op.JUMP:
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip = idx
-            elif op == Op.JUMPZ:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if self.hands == 0:
-                    self.ip = idx
-            elif op == Op.JUMPN:
-                if not self.hands_used:
-                    return Stop.EMPTY
-                if self.ip >= self.prog_len:
-                    return Stop.OUTBOUND
-                idx = <unsigned int> self.prog[self.ip]
-                self.ip += 1
-                if self.hands < 0:
-                    self.ip = idx
+    def __iter__(self):
+        """Execute a programm op-by-op
+
+        Every executed operation is yield as a tuple with:
+         - `addr: int`: operation address
+         - `name: str`: operation name
+         - `arg: None | int | list[int] | str`: operation argument
+         - `hands: None | int`: value held by worked after the operation is executed
+        """
+        cdef Stop stop
+        cdef unsigned int ip
+        if self.prog_len == 0:
+            raise ValueError("no program loaded")
+        if self.inbox_len == 0:
+            raise ValueError("no inbox given")
+        while True:
+            ip = self.ip
+            stop = step(self)
+            if stop == Stop.DONE:
+                yield ip, *self.srcop[ip], self.hands if self.hands_used else None
+                return
+            elif stop == Stop.STEPS:
+                yield ip, *self.srcop[ip], self.hands if self.hands_used else None
             else:
-                return Stop.BADOP
-        return Stop.STEPS
+                raise HRMProgramError(stop, *self.srcop.get(ip, (None, None)))
+
+    @property
+    def outbox(self):
+        """The produced outbox so far
+        
+        If the program is not fully executed, its outbox may not be complete.
+        """
+        cdef unsigned int i
+        return [self.outbox[i] for i in range(self.outbox_pos)]

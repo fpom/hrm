@@ -69,9 +69,8 @@ class HRMStepsError(HRMError):
 
 class HRM (object):
     def __init__(self, prog, labels):
-        self.prog = tuple((op.lower(), *args) for op, *args in prog)
+        self.prog = tuple((op.sub(op.lower()), *args) for op, *args in prog)
         self.labels = dict(labels)
-        self.check()
 
     @classmethod
     def parse(cls, src):
@@ -209,29 +208,6 @@ class HRM (object):
             self[a] = update[a] = value
         else:
             raise ValueError(f"invalid address {addr!r}")
-
-    def check(self):
-        for op, *args in self.prog:
-            fun = getattr(self, f"op_{op.lower()}", None)
-            HRMError.check(fun is not None, f"unknown operation {op}")
-            assert fun is not None  # for type checker
-            sig = inspect.signature(fun)
-            try:
-                bound = sig.bind(*args)
-            except TypeError:
-                raise HRMError(f"invalid arguments for {op}: {args}")
-            for name, value in bound.arguments.items():
-                annot = sig.parameters[name].annotation
-                if get_origin(annot) is Union:
-                    HRMError.check(any(isinstance(value, a)
-                                       for a in get_args(annot)),
-                                   f"invalid argument for {op}: {value}")
-                else:
-                    HRMError.check(isinstance(value, annot),
-                                   f"invalid argument for {op}: {value}")
-                if annot is str:
-                    HRMError.check(value in self.labels,
-                                   f"undefined label {value}")
 
     def op_inbox(self):
         if self.inbox:

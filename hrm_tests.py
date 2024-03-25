@@ -12,7 +12,7 @@ from colorama import Style as S
 from IPython.core import ultratb
 
 from hrm import HRM
-from hrm.hrmx import HRMX, HRMXError
+from hrm.hrmx import HRMX, HRMProgramError
 
 log = tqdm.tqdm(sorted(json.load(open("solutions/solutions.json")),
                        key=operator.itemgetter("levelNumber")))
@@ -61,9 +61,9 @@ for sol in log:
         if not all(isinstance(t, (int, type(None))) for t in floor):
             continue
         try:
-            hrmx = HRMX.compile(hrm.prog, hrm.labels)
+            hrmx = HRMX(hrm.prog, hrm.labels)
             out = hrmx(inbox, floor)
-        except HRMXError as err:
+        except HRMProgramError as err:
             errors[f"{F.RED}(quick) failed"] += 1
             log.write(f"{F.RED}{S.BRIGHT}(quick) failed:{S.RESET_ALL} {sol['path']}")
             log.write(f"  😡 {F.RED}{S.DIM}{err}{S.RESET_ALL}")

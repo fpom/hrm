@@ -1,0 +1,11 @@
+colors = {"inbox": "green",
+          "outbox": "green",
+          "copyfrom": "red",
+          "copyto": "red",
+          "add": "yellow",
+          "sub": "yellow",
+          "bumpup": "yellow",
+          "bumpdn": "yellow",
+          "jump": "blue",
+          "jumpz": "blue",
+          "jumpn": "blue"}

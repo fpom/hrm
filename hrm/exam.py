@@ -4,8 +4,10 @@ import itertools
 import functools
 import string
 
+from . import words
 from .parse import parse, LBLDEF
-from . import HRM, words, HRMError
+from .hrmx import HRMX, HRMProgramError
+from rich import print as rprint
 
 
 class Func:
@@ -45,7 +47,10 @@ class Func:
 
 class CheckError(Exception):
     def __init__(self, name, message):
-        super().__init__(f"[{name}]: {message}")
+        if name is None:
+            super().__init__(message)
+        else:
+            super().__init__(f"{name}: {message}")
 
 
 class Source:
@@ -60,6 +65,7 @@ class Source:
         self.tokens = []
         self.lno = {}
         self.onl = {}
+        self._hrm = None
         for lno, line in enumerate(parse.read(src).splitlines(), start=1):
             for kind, rexp in self._meta.items():
                 if match := rexp.match(line):
@@ -138,18 +144,23 @@ class Source:
         self.rename(remap)
         return remap
 
-    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=0):
+    @property
+    def hrm(self):
+        if self._hrm is None:
+            self._hrm = HRMX.parse(self.source())
+        return self._hrm
+
+    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=1024):
         if not funcs:
             checkers = {k: v for k, v in self.meta.items()
                         if isinstance(v, Func)}
         else:
             checkers = {f: self.meta[f] for f in funcs}
-        hrm = HRM.parse(self.source())
         if isinstance(floor, str):
             floor = self.meta[floor]
         try:
-            outbox = hrm(self.meta[inbox], floor, maxsteps=maxsteps)
-        except HRMError as err:
+            outbox = self.hrm(self.meta[inbox], floor, maxsteps=maxsteps)
+        except HRMProgramError as err:
             raise CheckError(None, str(err))
         for name, chk in checkers.items():
             box = list(self.meta[inbox])
@@ -191,22 +202,42 @@ class Source:
                 alt = labels
             else:
                 alt = [head]
-            yield from ([a] + t
+            yield from ([head.sub(a)] + t
                         for a in alt
                         for t in self._alt(tail, ops, regs, labels))
 
-    def alt(self, lno, ops=True, regs=True, labels=True, strip=True):
-        toks = self.tokens[self.onl[lno] - 1]
-        # [] => original line is yielded first
-        _ops = [t for t in toks if t in self._atl_op]
-        if _ops and ops:
-            for op in _ops[:]:  # [:] => avoid changing list during iteration
-                _ops.extend(self._atl_op[op] - set(_ops))
-        _regs = [t for t in toks if isinstance(t, int)]
-        if _regs and regs:
-            _regs.extend(set(self.regs) - set(_regs))
-        _labels = [t for t in toks if t.kind in ("lbl", "str")]
-        if _labels and labels:
-            _labels.extend(set(self.labels) - set(_labels))
-        yield from ("".join(str(t) for t in alt).strip(None if strip else "\0")
-                    for alt in self._alt(toks, _ops, _regs, _labels))
+    def alt(self, *lines, ops=True, regs=True, labels=True, check=True):
+        alt_ops = {}
+        l2a = {l: a for a, l in self.hrm.lineno.items()}
+        for lno in lines:
+            onl = self.onl[lno]
+            toks = self.tokens[onl - 1]
+            # [] => original line is yielded first
+            _ops = [t for t in toks if t in self._atl_op]
+            if _ops and ops:
+                for op in _ops[:]:  # [:] => don't change list during iteration
+                    _ops.extend(self._atl_op[op] - set(_ops))
+            _regs = [t for t in toks if isinstance(t, int)]
+            if _regs and regs:
+                _regs.extend(set(self.regs) - set(_regs))
+            _labels = [t for t in toks if t.kind in ("lbl", "str")]
+            if _labels and labels:
+                _labels.extend(set(self.labels) - set(_labels))
+            alt_ops[l2a[onl]] = [
+                [a for a in alt if a.kind != "skip"]
+                for alt in self._alt(toks, _ops, _regs, _labels)]
+        a2l = {a: self.lno[l] for a, l in self.hrm.lineno.items()}
+        hrm = self.hrm.copy()
+        keys, vals = zip(*alt_ops.items())
+        for version in itertools.product(*vals):
+            patch = dict(zip(keys, version))
+            if not check:
+                yield {self.lno[i+1]: p for i, p in patch.items()}
+                continue
+            hrm.patch(patch)
+            try:
+                self.check()
+                chk = True
+            except CheckError:
+                chk = False
+            yield chk, {a2l[i]: p for i, p in patch.items()}

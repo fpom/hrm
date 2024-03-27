@@ -41,37 +41,43 @@ class Tok(object):
     line = None
     start = None
     end = None
+    path = None
 
-    def __new__(cls, base, value, kind, lineno, line, start, end):
+    def __new__(cls, base, value, kind, lineno, line, start, end, path):
         obj = base.__new__(cls, value)
         obj.kind = kind
         obj.lineno = lineno
         obj.line = line
         obj.start = start
         obj.end = end
+        obj.path = path
         return obj
 
     def sub(self, new):
         return Tok.__new__(self.__class__, self.__class__.__base__,
                            new, self.kind, self.lineno,
-                           self.line, self.start, self.end)
+                           self.line, self.start, self.end, self.path)
 
-    def err(self, msg):
-        return (f"[{self.lineno}] {msg}\n"
-                f"  {self.line}\n"
-                f"  {' ' * self.start}{'^' * (self.end - self.start)}\n")
+    def err(self, msg, underline=True):
+        if underline:
+            return (f"[{self.path or '<string>'}:{self.lineno}] {msg}\n"
+                    f"  {self.line}\n"
+                    f"  {' ' * self.start}{'^' * (self.end - self.start)}\n")
+        else:
+            return (f"[{self.path or '<string>'}:{self.lineno}] {msg}\n"
+                    f"  {self.line}\n")
 
 
 class Str(str, Tok):
-    def __new__(cls, value, kind, lineno, line, start, end):
+    def __new__(cls, value, kind, lineno, line, start, end, path):
         return Tok.__new__(cls, str, str(value), kind, lineno,
-                           line, start, end)
+                           line, start, end, path)
 
 
 class Int(int, Tok):
-    def __new__(cls, value, kind, lineno, line, start, end):
+    def __new__(cls, value, kind, lineno, line, start, end, path):
         return Tok.__new__(cls, int, int(value), kind, lineno,
-                           line, start, end)
+                           line, start, end, path)
 
 
 class Parser:
@@ -87,22 +93,25 @@ class Parser:
         self.tok = re.compile("|".join(f"(?P<{k}>{v})"
                                        for k, v in self.tokens.items()),
                               re.I)
+        self.path = None
 
     def strip(self, line):
         return line.split("--", 1)[0].strip()
 
     def read(self, src):
-        if isinstance(src, io.TextIOBase):
+        if isinstance(src, io.FileIO):
+            stream = src
+            self.path = src.name
+        elif isinstance(src, io.TextIOBase):
             stream = src
         elif isinstance(src, pathlib.Path):
             stream = src.open()
+            self.path = src.name
         elif isinstance(src, str):
             try:
                 path = pathlib.Path(src)
-                if path.exists():
-                    stream = path.open()
-                else:
-                    stream = io.StringIO(src)
+                stream = path.open()
+                self.path = path.name
             except OSError:
                 stream = io.StringIO(src)
         else:
@@ -116,22 +125,22 @@ class Parser:
                           if v is not None)
             start, end = match.span()
             if start > pos:
-                yield Str(line[pos:start], "skip", lno, line, pos, start)
+                yield Str(line[pos:start], "skip", lno, line, pos, start, self.path)
             if v.isdecimal():
-                yield Int(v, k, lno, line, start, end)
+                yield Int(v, k, lno, line, start, end, self.path)
             elif (hd := v.lower()) in OPS:
-                yield Str(hd, "cmd", lno, line, start, end)
+                yield Str(hd, "cmd", lno, line, start, end, self.path)
             elif k == "lbl":
                 name = hd.rstrip(LBLDEF)
                 tail = hd[len(name):]
                 shift = len(name)
-                yield Str(name, "lbl", lno, line, start, start + shift)
-                yield Str(tail, "col", lno, line, start + shift, end)
+                yield Str(name, "lbl", lno, line, start, start + shift, self.path)
+                yield Str(tail, "col", lno, line, start + shift, end, self.path)
             else:
-                yield Str(hd, k, lno, line, start, end)
+                yield Str(hd, k, lno, line, start, end, self.path)
             pos = end
         if pos < len(line):
-            yield Str(line[pos:], "skip", lno, line, pos, len(line))
+            yield Str(line[pos:], "skip", lno, line, pos, len(line), self.path)
 
     def tokenize(self, src):
         skip = False

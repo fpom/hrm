@@ -9,18 +9,7 @@ from rich.status import Status
 from rich.text import Text
 
 from .parse import parse as hrmparse
-
-colors = {"inbox": "green",
-          "outbox": "green",
-          "copyfrom": "red",
-          "copyto": "red",
-          "add": "yellow",
-          "sub": "yellow",
-          "bumpup": "yellow",
-          "bumpdn": "yellow",
-          "jump": "blue",
-          "jumpz": "blue",
-          "jumpn": "blue"}
+from .ops import colors
 
 
 class Logger:

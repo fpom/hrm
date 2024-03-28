@@ -4,6 +4,12 @@ import itertools as I
 import functools as F
 import string as S
 
+from rich.progress import track as rich_track
+from pygments.lexer import RegexLexer
+from pygments.token import Name, Keyword, Punctuation, Number, Text, Comment
+from pygments.formatters import LatexFormatter
+from pygments import highlight
+
 from . import words as W
 from .parse import parse, LBLDEF
 from .hrmx import HRMX, HRMProgramError
@@ -278,11 +284,25 @@ class Source:
 
 
 class SourcePool:
-    def __init__(self, paths, alt, chk={}):
-        self.src = [Source(p) for p in paths]
-        self.alt = [src.alt(**{k: src.meta.get(v, v) for k, v in alt.items()},
-                            **{k: src.meta.get(v, v) for k, v in chk.items()})
-                    for src in self.src]
+    def __init__(self, paths, alt, chk={}, verbose=True):
+        self.src = []
+        self.alt = []
+        if verbose:
+            track = rich_track
+        else:
+            track = self._track
+        for p in track(paths,
+                       transient=True,
+                       description="Loading HRM sources"):
+            src = Source(p)
+            self.src.append(src)
+            self.alt.append(src.alt(**{k: src.meta.get(v, v)
+                                       for k, v in alt.items()},
+                                    **{k: src.meta.get(v, v)
+                                       for k, v in chk.items()}))
+
+    def _track(self, items, **_):
+        return items
 
     def pick(self, count=0, rand={}):
         idx = R.randint(0, len(self.src) - 1)
@@ -295,3 +315,45 @@ class SourcePool:
                 if len(a) > count:
                     alt[n] = [a[0]] + R.sample(a[1:], count - 1)
         return ren, src, alt
+
+
+class HRMLexer(RegexLexer):
+    name = 'HRM'
+    aliases = ['hrm']
+    filenames = ['*.hrm']
+    flags = re.I
+    tokens = {
+        'root': [
+            (r'\s+', Text),
+            (r'--.*\n', Comment.Single),
+            (r'\S+:', Name.Label),
+            (r'\b(add|inbox|outbox|copyfrom|copyto|sub|bumpup|bumpdn|jump|jumpz|jumpn)\b',
+             Keyword.Reserved),
+            (r'[\[\]]+', Punctuation),
+            (r'\d+', Number.Integer),
+            (r'\S+', Name.Label),
+        ]
+    }
+
+
+class Pygmentize:
+    def __init__(self, fmt=LatexFormatter):
+        self.lexer = HRMLexer()
+        self.formatter = fmt()
+
+    @F.cache
+    def __call__(self, source, single=False, **opt):
+        if isinstance(source, str):
+            src = source
+        elif isinstance(source, (tuple, list)):
+            src = " ".join(str(t) for t in source)
+        elif isinstance(source, Source):
+            src = source.source(**opt)
+        else:
+            raise ValueError("invalid HRM source")
+        pyg = highlight(src, self.lexer, self.formatter)
+        if single:
+            lines = pyg.splitlines()
+            return " ".join(lines[1:-1])
+        else:
+            return pyg

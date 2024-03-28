@@ -1,23 +1,19 @@
 import re
-import random
-import itertools
-import functools
-import string
+import random as R
+import itertools as I
+import functools as F
+import string as S
 
-from . import words
+from . import words as W
 from .parse import parse, LBLDEF
 from .hrmx import HRMX, HRMProgramError
-from rich import print as rprint
 
 
 class Func:
-    _builtins = {"R": random,
-                 "W": words,
-                 "I": itertools,
-                 "F": functools,
-                 "S": string}
+    _builtins = {"R": R, "W": W, "I": I, "F": F, "S": S}
 
-    def __init__(self, args, expr, env={}):
+    def __init__(self, name, args, expr, env={}):
+        self.name = name
         self.args = tuple(args)
         self.expr = expr.strip()
         self._env = env
@@ -60,7 +56,7 @@ class Source:
              "text": re.compile(r"^\s*--\s*(\w+)\s*:\s*(.+)$"),
              "pyrun": re.compile(f"^{_pyrun.pattern}")}
 
-    def __init__(self, src):
+    def __init__(self, src, **check):
         self.meta = {}
         self.tokens = []
         self.lno = {}
@@ -87,9 +83,23 @@ class Source:
             elif kind == "pyrun":
                 Func.exec(g[0], self.meta)
             elif kind == "func":
-                self.meta[g[0]] = Func([a for s in g[1].split(",")
+                self.meta[g[0]] = Func(g[0],
+                                       [a for s in g[1].split(",")
                                         if (a := s.strip())],
-                                       g[2], self.meta)
+                                       g[2],
+                                       self.meta)
+        if check:
+            self.check(**check)
+
+    def copy(self):
+        cls = self.__class__
+        new = cls.__new__(cls)
+        new.meta = dict(self.meta)
+        new.tokens = [list(toks) for toks in self.tokens]
+        new.lno = dict(self.lno)
+        new.onl = dict(self.onl)
+        new._hrm = None
+        return new
 
     def __getitem__(self, lno):
         toks = self.tokens[self.onl[lno] - 1]
@@ -129,20 +139,21 @@ class Source:
                    for tok in line if tok.kind == "lbl")
 
     def rename(self, remap):
-        for line in self.tokens:
+        new = self.copy()
+        for line in new.tokens:
             for i, tok in enumerate(line):
                 if tok in remap:
                     line[i] = tok.sub(remap[tok])
+        return new
 
-    def randomize(self, names=words.animals, nregs=9):
+    def randomize(self, names=W.animals, nregs=9):
         regs = self.regs
         lbls = self.labels
         nregs = max(nregs, len(regs))
         remap = {}
-        remap.update(zip(regs, random.sample(range(nregs), len(regs))))
-        remap.update(zip(lbls, random.sample(names, len(lbls))))
-        self.rename(remap)
-        return remap
+        remap.update(zip(regs, R.sample(range(nregs), len(regs))))
+        remap.update(zip(lbls, R.sample(names, len(lbls))))
+        return remap, self.rename(remap)
 
     @property
     def hrm(self):
@@ -150,29 +161,37 @@ class Source:
             self._hrm = HRMX.parse(self.source())
         return self._hrm
 
-    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=1024):
-        if not funcs:
+    def expected_outbox(self, inbox, chk):
+        if isinstance(inbox, str):
+            inbox = self.meta[inbox]
+        box = list(inbox)
+        if not len(box) % len(chk.args) == 0:
+            raise CheckError(chk.name, "wrong inbox size")
+        expected = []
+        while box:
+            args = [box.pop(0) for _ in chk.args]
+            if isinstance(out := chk(*args), tuple):
+                expected.extend(out)
+            else:
+                expected.append(out)
+        return expected
+
+    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=1024, hrm=None):
+        if hrm is None:
+            hrm = self.hrm
+        if funcs:
+            checkers = {f: self.meta[f] for f in funcs}
+        else:
             checkers = {k: v for k, v in self.meta.items()
                         if isinstance(v, Func)}
-        else:
-            checkers = {f: self.meta[f] for f in funcs}
         if isinstance(floor, str):
             floor = self.meta[floor]
         try:
-            outbox = self.hrm(self.meta[inbox], floor, maxsteps=maxsteps)
+            outbox = hrm(self.meta[inbox], floor, maxsteps=maxsteps)
         except HRMProgramError as err:
             raise CheckError(None, str(err))
         for name, chk in checkers.items():
-            box = list(self.meta[inbox])
-            if not len(box) % len(chk.args) == 0:
-                raise CheckError(name, "wrong inbox size")
-            expected = []
-            while box:
-                args = [box.pop(0) for _ in chk.args]
-                if isinstance(out := chk(*args), tuple):
-                    expected.extend(out)
-                else:
-                    expected.append(out)
+            expected = self.expected_outbox(inbox, chk)
             if outbox != expected:
                 raise CheckError(name, f"expected {expected} but got {outbox}")
 
@@ -191,7 +210,7 @@ class Source:
 
     def _alt(self, toks, ops, regs, labels):
         if not toks:
-            yield []
+            yield ()
         else:
             head, *tail = toks
             if head in self._atl_op:
@@ -202,17 +221,44 @@ class Source:
                 alt = labels
             else:
                 alt = [head]
-            yield from ([head.sub(a)] + t
+            yield from ((head.sub(a),) + t
                         for a in alt
                         for t in self._alt(tail, ops, regs, labels))
 
-    def alt(self, *lines, ops=True, regs=True, labels=True, check=True):
-        alt_ops = {}
+    def _alt_check(self, patch, hrm, **check):
+        hrm.patch(patch)
+        try:
+            self.check(hrm=hrm, **check)
+            return True
+        except CheckError:
+            return False
+
+    def _alt_chose(self, addr, instr, count, **check):
+        hrm = self.hrm.copy()
+        alt = [[pool[0]] for pool in instr]
+        instr = [list(pool[1:]) for pool in instr]
+        patch = dict(zip(addr, [a[0] for a in alt]))
+        assert self._alt_check(patch, hrm, **check)
+        for pos, pool in enumerate(instr):
+            while pool and len(alt[pos]) < count:
+                c = pool.pop(R.randint(0, len(pool)-1))
+                for version in I.product(*([c] if pos == i else a
+                                         for i, a in enumerate(alt))):
+                    patch = dict(zip(addr, version))
+                    if self._alt_check(patch, hrm, **check):
+                        break
+                else:
+                    alt[pos].append(c)
+        return alt
+
+    def alt(self, lines, ops=True, regs=True, labels=True, count=0, **check):
+        addr, instr = [], []
         l2a = {l: a for a, l in self.hrm.lineno.items()}
+        ref = []
         for lno in lines:
             onl = self.onl[lno]
-            toks = self.tokens[onl - 1]
-            # [] => original line is yielded first
+            toks = tuple(t for t in self.tokens[onl - 1] if t.kind != "skip")
+            ref.append(toks)
             _ops = [t for t in toks if t in self._atl_op]
             if _ops and ops:
                 for op in _ops[:]:  # [:] => don't change list during iteration
@@ -223,21 +269,29 @@ class Source:
             _labels = [t for t in toks if t.kind in ("lbl", "str")]
             if _labels and labels:
                 _labels.extend(set(self.labels) - set(_labels))
-            alt_ops[l2a[onl]] = [
-                [a for a in alt if a.kind != "skip"]
-                for alt in self._alt(toks, _ops, _regs, _labels)]
-        a2l = {a: self.lno[l] for a, l in self.hrm.lineno.items()}
-        hrm = self.hrm.copy()
-        keys, vals = zip(*alt_ops.items())
-        for version in itertools.product(*vals):
-            patch = dict(zip(keys, version))
-            if not check:
-                yield {self.lno[i+1]: p for i, p in patch.items()}
-                continue
-            hrm.patch(patch)
-            try:
-                self.check()
-                chk = True
-            except CheckError:
-                chk = False
-            yield chk, {a2l[i]: p for i, p in patch.items()}
+            addr.append(l2a[onl])
+            instr.append(tuple(self._alt(toks, _ops, _regs, _labels)))
+        assert all(v[0] == r for v, r in zip(instr, ref))
+        if count <= 0:
+            count = max(len(i) for i in instr)
+        return dict(zip(lines, self._alt_chose(addr, instr, count, **check)))
+
+
+class SourcePool:
+    def __init__(self, paths, alt, chk={}):
+        self.src = [Source(p) for p in paths]
+        self.alt = [src.alt(**{k: src.meta.get(v, v) for k, v in alt.items()},
+                            **{k: src.meta.get(v, v) for k, v in chk.items()})
+                    for src in self.src]
+
+    def pick(self, count=0, rand={}):
+        idx = R.randint(0, len(self.src) - 1)
+        ren, src = self.src[idx].randomize(**rand)
+        alt = {n: [tuple(t.sub(ren[t]) if t in ren else t for t in toks)
+                   for toks in a]
+               for n, a in self.alt[idx].items()}
+        if count > 0:
+            for n, a in alt.items():
+                if len(a) > count:
+                    alt[n] = [a[0]] + R.sample(a[1:], count - 1)
+        return ren, src, alt

@@ -11,7 +11,7 @@ from rich import print as rprint
 from . import HRM, HRMError
 from .parse import ParseError
 from .tui import main as tui
-from .hrmx import HRMX, HRMXError
+from .hrmx import HRMX, HRMProgramError
 
 
 app = Typer(context_settings={"help_option_names": ["-h", "--help"]})
@@ -208,7 +208,7 @@ def xrun(
     hrmx = HRMX.compile(hrm.prog, hrm.labels, capacity)
     try:
         print(*hrmx(inbox, tiles, 2 if verbose else 1))
-    except HRMXError as err:
+    except HRMProgramError as err:
         rprint(f"[red]error:[/] {err}")
         raise Exit(1)
 

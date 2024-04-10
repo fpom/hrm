@@ -4,15 +4,17 @@ import itertools as I
 import functools as F
 import string as S
 
-from rich.progress import track as rich_track
+from pathlib import Path
+
 from pygments.lexer import RegexLexer
 from pygments.token import Name, Keyword, Punctuation, Number, Text, Comment
 from pygments.formatters import LatexFormatter
 from pygments import highlight
 
 from . import words as W
-from .parse import parse, LBLDEF
-from .hrmx import HRMX, HRMProgramError
+from .parse import parse, LBLDEF, Str
+from .hrmx import HRMX
+from . import ops
 
 
 class Func:
@@ -22,19 +24,21 @@ class Func:
         self.name = name
         self.args = tuple(args)
         self.expr = expr.strip()
-        self._env = env
+        self.code = compile(self.expr, f"<{name}>", "eval")
+        self._env = self._builtins.copy()
+        self._env.update(env)
 
     def __repr__(self):
         return f"({', '.join(self.args)} => {self.expr})"
 
     def __call__(self, *args):
-        env = dict(self._env)
+        env = self._env.copy()
         env.update(zip(self.args, args))
-        return self.eval(self.expr, env)
+        return self.eval(self.code, env)
 
     @classmethod
     def env(cls, extra={}):
-        env = dict(cls._builtins)
+        env = cls._builtins.copy()
         env.update(extra)
         return env
 
@@ -47,12 +51,8 @@ class Func:
         exec(stmt, cls.env(more), extra)
 
 
-class CheckError(Exception):
-    def __init__(self, name, message):
-        if name is None:
-            super().__init__(message)
-        else:
-            super().__init__(f"{name}: {message}")
+class SourceError(Exception):
+    pass
 
 
 class Source:
@@ -62,28 +62,37 @@ class Source:
              "text": re.compile(r"^\s*--\s*(\w+)\s*:\s*(.+)$"),
              "pyrun": re.compile(f"^{_pyrun.pattern}")}
 
-    def __init__(self, src, **check):
+    def __init__(self, src, rand={}):
+        self.path = Path(src)
+        self._rand = rand
+        self._inbox = self._outbox = self._hrm = None
         self.meta = {}
-        self.tokens = []
+        self._regs = set()
+        self._labels = set()
+        self.src = []
         self.lno = {}
         self.onl = {}
-        self._hrm = None
-        for lno, line in enumerate(parse.read(src).splitlines(), start=1):
+        for lno, line in enumerate(self.path.open(), start=1):
+            line = line.rstrip()
             for kind, rexp in self._meta.items():
                 if match := rexp.match(line):
                     break
             else:
-                onl = len(self.tokens) + 1
+                onl = len(self.src) + 1
                 self.lno[onl] = lno
                 self.onl[lno] = onl
                 if match := self._pyrun.search(line):
                     Func.exec(match.group(1), self.meta, line=line, lno=lno)
                     line = line.replace(match.group(0), "")
-                self.tokens.append(list(parse.tokenize_line(line, onl)))
+                self.src.append(line)
+                self._scan(line)
                 continue
             g = match.groups()
             if kind == "expr":
-                self.meta[g[0]] = Func.eval(g[1], self.meta)
+                if g[0] == "inbox":
+                    self.meta[g[0]] = Func(g[0], [], g[1], self.meta)
+                else:
+                    self.meta[g[0]] = Func.eval(g[1], self.meta)
             elif kind == "text":
                 self.meta[g[0]] = g[1].strip()
             elif kind == "pyrun":
@@ -94,72 +103,26 @@ class Source:
                                         if (a := s.strip())],
                                        g[2],
                                        self.meta)
-        if check:
-            self.check(**check)
 
-    def copy(self):
-        cls = self.__class__
-        new = cls.__new__(cls)
-        new.meta = dict(self.meta)
-        new.tokens = [list(toks) for toks in self.tokens]
-        new.lno = dict(self.lno)
-        new.onl = dict(self.onl)
-        new._hrm = None
-        return new
+    def _scan(self, line):
+        for tok in parse.tokenize_line(line, 1):
+            if isinstance(tok, int):
+                self._regs.add(tok)
+            elif tok.kind == "lbl":
+                self._labels.add(str(tok).rstrip(LBLDEF))
 
-    def __getitem__(self, lno):
-        toks = self.tokens[self.onl[lno] - 1]
-        return "".join(str(t) for t in toks)
-
-    def source(self, hide={}):
-        lines = []
-        for num, toks in enumerate(self.tokens, start=1):
-            lno = self.lno[num]
-            ind = []
-            for t in toks:
-                if t.kind == "skip" and not t.strip():
-                    ind.append(t)
-                else:
-                    break
-            indent = "".join(ind)
-            if (h := hide.get(lno, None)) is None:
-                lines.append("".join(str(t) for t in toks))
-            elif callable(h):
-                lines.append(h(lno, toks[0].line, indent))
-            else:
-                if not isinstance(h, str):
-                    h = "{indent}-- line {lno}"
-                env = dict(self.meta, indent=indent, lno=lno)
-                lines.append(Func.eval(f"f{h!r}", env))
-        return "\n".join(lines)
+    def __getitem__(self, old):
+        return self._rand.get(old, old)
 
     @property
+    @F.cache
     def regs(self):
-        return set(tok for line in self.tokens for tok in line
-                   if isinstance(tok, int))
+        return tuple(sorted(self._regs))
 
     @property
+    @F.cache
     def labels(self):
-        return set(tok.sub(str(tok).rstrip(LBLDEF))
-                   for line in self.tokens
-                   for tok in line if tok.kind == "lbl")
-
-    def rename(self, remap):
-        new = self.copy()
-        for line in new.tokens:
-            for i, tok in enumerate(line):
-                if tok in remap:
-                    line[i] = tok.sub(remap[tok])
-        return new
-
-    def randomize(self, names=W.animals, nregs=9):
-        regs = self.regs
-        lbls = self.labels
-        nregs = max(nregs, len(regs))
-        remap = {}
-        remap.update(zip(regs, R.sample(range(nregs), len(regs))))
-        remap.update(zip(lbls, R.sample(names, len(lbls))))
-        return remap, self.rename(remap)
+        return tuple(sorted(self._labels))
 
     @property
     def hrm(self):
@@ -167,39 +130,92 @@ class Source:
             self._hrm = HRMX.parse(self.source())
         return self._hrm
 
-    def expected_outbox(self, inbox, chk):
-        if isinstance(inbox, str):
-            inbox = self.meta[inbox]
-        box = list(inbox)
-        if not len(box) % len(chk.args) == 0:
-            raise CheckError(chk.name, "wrong inbox size")
+    @hrm.deleter
+    def hrm(self):
+        self._hrm = None
+
+    @property
+    def inbox(self):
+        if self._inbox is None:
+            self._inbox = self.meta["inbox"]()
+        return self._inbox
+
+    @inbox.deleter
+    def inbox(self):
+        self._inbox = None
+
+    @property
+    def expected(self):
+        box = list(self.inbox)
+        out = self.meta["outbox"]
+        if not len(box) % len(out.args) == 0:
+            raise SourceError("wrong inbox size")
         expected = []
         while box:
-            args = [box.pop(0) for _ in chk.args]
-            if isinstance(out := chk(*args), tuple):
-                expected.extend(out)
+            args = [box.pop(0) for _ in out.args]
+            if isinstance(val := out(*args), tuple):
+                expected.extend(val)
             else:
-                expected.append(out)
+                expected.append(val)
         return expected
 
-    def check(self, *funcs, inbox="inbox", floor=[], maxsteps=1024, hrm=None):
-        if hrm is None:
-            hrm = self.hrm
-        if funcs:
-            checkers = {f: self.meta[f] for f in funcs}
-        else:
-            checkers = {k: v for k, v in self.meta.items()
-                        if isinstance(v, Func)}
-        if isinstance(floor, str):
-            floor = self.meta[floor]
-        try:
-            outbox = hrm(self.meta[inbox], floor, maxsteps=maxsteps)
-        except HRMProgramError as err:
-            raise CheckError(None, str(err))
-        for name, chk in checkers.items():
-            expected = self.expected_outbox(inbox, chk)
-            if outbox != expected:
-                raise CheckError(name, f"expected {expected} but got {outbox}")
+    @property
+    def outbox(self):
+        return self.hrm(self.inbox)
+
+    def check(self):
+        exp, out = self.expected, self.outbox
+        if exp != out:
+            raise SourceError("expected outbox {exp} but got {out}")
+
+    def source(self, hide={}):
+        lines = []
+        for num, src in enumerate(self.src, start=1):
+            lno = self.lno[num]
+            indent = " " * (len(src) - len(src.lstrip()))
+            if (h := hide.get(lno, None)) is None:
+                lines.append(src)
+            elif callable(h):
+                lines.append(h(lno, src, indent))
+            else:
+                if not isinstance(h, str):
+                    h = "{indent}-- line {lno}"
+                env = dict(self.meta, indent=indent, lno=lno)
+                lines.append(Func.eval(f"f{h!r}", env))
+        return "\n".join(lines)
+
+    def copy(self, **attr):
+        cls = self.__class__
+        new = cls.__new__(cls)
+        new._inbox = new._outbox = new._hrm = None
+        for a in ("_regs", "_labels", "_rand", "src"):
+            if a in attr:
+                setattr(new, a, attr[a])
+            else:
+                setattr(new, a, getattr(self, a).copy())
+        new.meta = self.meta.copy()
+        new.lno = self.lno.copy()
+        new.onl = self.onl.copy()
+        return new
+
+    def randomize(self, names=W.animals, nregs=9):
+        nregs = max(nregs, len(self.regs))
+        rand, reg, lbl = {}, {}, {}
+        reg.update(zip(self.regs, R.sample(range(nregs), len(self.regs))))
+        rand.update(reg)
+        lbl.update(zip(self.labels, R.sample(names, len(self.labels))))
+        rand.update(lbl)
+        RAND = {str(k).upper(): str(v) for k, v in rand.items()}
+        sub = re.compile(fr"\b({'|'.join(RAND)})\b", re.I)
+
+        def matchsub(match):
+            return RAND.get(match[0].upper(), match[0])
+
+        src = [sub.sub(matchsub, ln) for ln in self.src]
+        return self.copy(_regs=set(reg.values()),
+                         _labels=set(lbl.values()),
+                         src=src,
+                         _rand=rand)
 
     _atl_op = {
         "inbox": {"outbox"},
@@ -227,52 +243,50 @@ class Source:
                 alt = labels
             else:
                 alt = [head]
-            yield from ((head.sub(a),) + t
-                        for a in alt
+            yield from ((a,) + t for a in alt
                         for t in self._alt(tail, ops, regs, labels))
 
-    def _alt_check(self, patch, hrm, **check):
-        hrm.patch(patch)
-        try:
-            self.check(hrm=hrm, **check)
-            return True
-        except CheckError:
-            return False
-
-    def _alt_chose(self, addr, instr, count, **check):
+    def _alt_chose(self, addr, instr, count):
+        outbox = self.outbox
         hrm = self.hrm.copy()
         alt = [[pool[0]] for pool in instr]
         instr = [list(pool[1:]) for pool in instr]
         patch = dict(zip(addr, [a[0] for a in alt]))
-        assert self._alt_check(patch, hrm, **check)
         for pos, pool in enumerate(instr):
             while pool and len(alt[pos]) < count:
                 c = pool.pop(R.randint(0, len(pool)-1))
                 for version in I.product(*([c] if pos == i else a
                                          for i, a in enumerate(alt))):
                     patch = dict(zip(addr, version))
-                    if self._alt_check(patch, hrm, **check):
-                        break
+                    hrm.patch(patch)
+                    try:
+                        if outbox == hrm(self.meta["inbox"]):
+                            break
+                    except Exception:
+                        pass
                 else:
                     alt[pos].append(c)
         return alt
 
-    def alt(self, lines, ops=True, regs=True, labels=True, count=0, **check):
+    def alt(self, lines, ops=True, regs=True, labels=True, count=0):
+        if isinstance(lines, str):
+            lines = self.meta[lines]
         addr, instr = [], []
         l2a = {l: a for a, l in self.hrm.lineno.items()}
         ref = []
         for lno in lines:
             onl = self.onl[lno]
-            toks = tuple(t for t in self.tokens[onl - 1] if t.kind != "skip")
+            toks = tuple(t for t in parse.tokenize_line(self.src[onl - 1], lno)
+                         if t.kind != "skip")
             ref.append(toks)
-            _ops = [t for t in toks if t in self._atl_op]
+            _ops = [str(t) for t in toks if t in self._atl_op]
             if _ops and ops:
                 for op in _ops[:]:  # [:] => don't change list during iteration
                     _ops.extend(self._atl_op[op] - set(_ops))
-            _regs = [t for t in toks if isinstance(t, int)]
+            _regs = [int(t) for t in toks if isinstance(t, int)]
             if _regs and regs:
                 _regs.extend(set(self.regs) - set(_regs))
-            _labels = [t for t in toks if t.kind in ("lbl", "str")]
+            _labels = [str(t) for t in toks if t.kind in ("lbl", "str")]
             if _labels and labels:
                 _labels.extend(set(self.labels) - set(_labels))
             addr.append(l2a[onl])
@@ -280,58 +294,34 @@ class Source:
         assert all(v[0] == r for v, r in zip(instr, ref))
         if count <= 0:
             count = max(len(i) for i in instr)
-        return dict(zip(lines, self._alt_chose(addr, instr, count, **check)))
+        return dict(zip(lines, self._alt_chose(addr, instr, count)))
 
 
 class SourcePool:
-    def __init__(self, paths, alt, chk={}, verbose=True):
-        self.src = []
-        self.alt = []
-        if verbose:
-            track = rich_track
-        else:
-            track = self._track
-        for p in track(paths,
-                       transient=True,
-                       description="Loading HRM sources"):
-            src = Source(p)
-            self.src.append(src)
-            self.alt.append(src.alt(**{k: src.meta.get(v, v)
-                                       for k, v in alt.items()},
-                                    **{k: src.meta.get(v, v)
-                                       for k, v in chk.items()}))
+    def __init__(self, paths):
+        self.src = [Source(p) for p in paths]
 
-    def _track(self, items, **_):
-        return items
-
-    def pick(self, count=0, rand={}):
-        idx = R.randint(0, len(self.src) - 1)
-        ren, src = self.src[idx].randomize(**rand)
-        alt = {n: [tuple(t.sub(ren[t]) if t in ren else t for t in toks)
-                   for toks in a]
-               for n, a in self.alt[idx].items()}
-        if count > 0:
-            for n, a in alt.items():
-                if len(a) > count:
-                    alt[n] = [a[0]] + R.sample(a[1:], count - 1)
-        return ren, src, alt
+    def pick(self, check=True, names=W.animals, nregs=9):
+        src = R.choice(self.src).randomize(names, nregs)
+        if check:
+            src.check()
+        return src
 
 
 class HRMLexer(RegexLexer):
-    name = 'HRM'
-    aliases = ['hrm']
-    filenames = ['*.hrm']
+    name = "HRM"
+    aliases = ["hrm"]
+    filenames = ["*.hrm"]
     flags = re.I
     tokens = {
-        'root': [
-            (r'\s+', Text),
-            (r'--.*\n', Comment.Single),
-            (r'\S+:', Name.Label),
-            (r'\b(add|inbox|outbox|copyfrom|copyto|sub|bumpup|bumpdn|jump|jumpz|jumpn)\b',
-             Keyword.Reserved),
-            (r'[\[\]]+', Punctuation),
-            (r'\d+', Number.Integer),
-            (r'\S+', Name.Label),
+        "root": [
+            (r"\s+", Text),
+            (r"--.*\n", Comment.Single),
+            (r"\S+:", Name.Label),
+            (fr"\b({'|'.join(ops.colors)})\b", Keyword.Reserved),
+            (r"[\[\]]+", Punctuation),
+            (r"\d+", Number.Integer),
+            (r"\S+", Name.Label),
         ]
     }
 
